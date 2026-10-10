@@ -72,10 +72,11 @@ TERMDOCK_DATA=./data ./termdock
   last viewer leaves or the shell exits. Viewers can only watch the main
   terminal; collaborators may open extra ones.
 - **Pop out**: every terminal tab has a **⧉ Pop out** button that opens the
-  session in a standalone popup window (`/t/{id}`) — just the terminal
-  filling the window, with the session name (and live status) in the window
-  title. The popup uses the same attach websocket and the same authorization
-  as the dashboard.
+  session in a standalone popup window (`/t/{id}`) — the popup shows a tab
+  strip with all of the container's terminals (same `name` / `name (2)` / …
+  labels as the dashboard) plus a **+** button for new shells, so the popup
+  mirrors the container's full tab set. The popup uses the same attach
+  websocket and the same authorization as the dashboard.
 - **Share**: the Share button on a tab lets you grant another user `viewer`
   (watch-only) or `collaborator` (interactive) access, list grants, and
   revoke them. Viewers see a "View only" banner and their keystrokes are

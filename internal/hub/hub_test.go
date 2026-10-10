@@ -404,3 +404,36 @@ func TestEphemeralTermShutsDownWhenShellExits(t *testing.T) {
 		t.Fatalf("NumClients = %d after ephemeral term exited, want 0", n)
 	}
 }
+
+func TestListTermsSeqOrdering(t *testing.T) {
+	h := New(func(ctx context.Context, _, _ string, _, _ uint) (PTYConn, error) {
+		return newFakePTY(), nil
+	}, nil)
+	srv, dial := testServer(t, h)
+	defer srv.Close()
+
+	// Open an extra terminal BEFORE main: main must still be seq 1.
+	extra := dial("u1", "collaborator", "t-extra")
+	defer extra.Close()
+	time.Sleep(200 * time.Millisecond)
+	mainWS := dial("u1", "collaborator", "main")
+	defer mainWS.Close()
+	time.Sleep(200 * time.Millisecond)
+
+	terms := h.ListTerms("sess1")
+	if len(terms) != 2 {
+		t.Fatalf("ListTerms = %d terms, want 2", len(terms))
+	}
+	if terms[0].ID != "main" || terms[0].Seq != 1 {
+		t.Fatalf("first term = %+v, want main with seq 1", terms[0])
+	}
+	if terms[1].ID != "t-extra" || terms[1].Seq != 2 {
+		t.Fatalf("second term = %+v, want t-extra with seq 2", terms[1])
+	}
+	if terms[0].Clients != 1 || terms[1].Clients != 1 {
+		t.Fatalf("client counts = %d,%d, want 1,1", terms[0].Clients, terms[1].Clients)
+	}
+	if got := h.ListTerms("nope"); len(got) != 0 {
+		t.Fatalf("ListTerms(unknown) = %v, want empty", got)
+	}
+}

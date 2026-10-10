@@ -11,7 +11,6 @@ const S = {
   sessions: [],
   tabs: new Map(),      // "sessionId:termId" -> tab state
   termStates: new Map(), // "sessionId:termId" -> terminal state ('waiting'|'running'|...)
-  termSeq: {},           // sessionId -> next extra-terminal number for labels
 };
 
 const $ = (id) => document.getElementById(id);
@@ -240,19 +239,12 @@ function openTab(sessionId, termId) {
 
   $('empty-state').style.display = 'none';
 
-  // Label extra terminals "name (2)", "name (3)", …; main keeps the bare name.
-  let label = s.name;
-  if (termId !== 'main') {
-    const n = (S.termSeq[sessionId] || 1) + 1;
-    S.termSeq[sessionId] = n;
-    label = `${s.name} (${n})`;
-  }
-
+  // Provisional label; the server-assigned seq refines it (name / name (2)…).
   const tabEl = document.createElement('div');
   tabEl.className = 'tab';
   tabEl.innerHTML = `<span class="dot ${s.status}"></span><span class="tab-name"></span>
     <button class="tab-close" title="Close tab">×</button>`;
-  tabEl.querySelector('.tab-name').textContent = label;
+  tabEl.querySelector('.tab-name').textContent = termId === 'main' ? s.name : `${s.name} …`;
   tabEl.onclick = (e) => {
     if (e.target.classList.contains('tab-close')) closeTab(key);
     else activateTab(key);
@@ -277,7 +269,7 @@ function openTab(sessionId, termId) {
   $('tab-bar').insertBefore(tabEl, $('new-term-btn'));
   $('tab-panels').appendChild(panelEl);
 
-  const tab = { key, sessionId, termId, label, session: s, tabEl, panelEl, tterm: null };
+  const tab = { key, sessionId, termId, label: tabEl.querySelector('.tab-name').textContent, session: s, tabEl, panelEl, tterm: null };
   S.tabs.set(key, tab);
 
   panelEl.querySelector('.share-btn').onclick = () => openShareModal(sessionId);
@@ -305,6 +297,19 @@ function openTab(sessionId, termId) {
     tab.panelEl.querySelector('.terminal-wrap').innerHTML =
       `<div style="padding:24px;color:#ff7b72">Couldn't open the terminal view: ${(e && e.message) || e}<br>Close this tab and click the session in the sidebar to retry.</div>`;
   }
+}
+
+// The server assigns each terminal a stable seq (1 = main, 2,3,… = extras);
+// label tabs "name" / "name (2)" / … so the dashboard and popups agree.
+async function refreshTabLabel(tab) {
+  try {
+    const r = await api('GET', `/api/sessions/${tab.sessionId}/terms`);
+    if (!r.ok) return;
+    const t = (r.data.terms || []).find((x) => x.id === tab.termId);
+    if (!t) return;
+    tab.label = t.seq === 1 ? tab.session.name : `${tab.session.name} (${t.seq})`;
+    tab.tabEl.querySelector('.tab-name').textContent = tab.label;
+  } catch (e) { /* keep the provisional label */ }
 }
 
 function activateTab(key) {
@@ -419,6 +424,7 @@ function attachTab(tab) {
     },
     onRole: (role) => {
       tab.panelEl.querySelector('.viewer-banner').classList.toggle('hidden', role !== 'viewer');
+      refreshTabLabel(tab); // role arrives right after attach; term exists now
     },
     onTermClosed: () => {
       // Ephemeral extra terminal's shell exited: the tab is done.

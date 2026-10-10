@@ -484,6 +484,19 @@ func (h *Handler) Attach(w http.ResponseWriter, r *http.Request, sessionID strin
 	h.Hub.Attach(r.Context(), sess.ID, sess.ContainerID, sess.Shell, termID, u.ID, ac.role, ws)
 }
 
+// ListTerms handles GET /api/sessions/{id}/terms — the session's live
+// terminals (main plus any extra shells), ordered for tab display.
+func (h *Handler) ListTerms(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if _, ok := h.resolve(w, r, sessionID); !ok {
+		return
+	}
+	terms := h.Hub.ListTerms(sessionID)
+	if terms == nil {
+		terms = []hub.TermInfo{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"terms": terms})
+}
+
 // validTermID allows the fixed "main" ID and client-generated extra-terminal
 // IDs (alphanumeric, dash, underscore; bounded length).
 func validTermID(id string) bool {

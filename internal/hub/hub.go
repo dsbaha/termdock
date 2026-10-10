@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sort"
 	"sync"
 	"time"
 )
@@ -106,6 +107,7 @@ func (h *Hub) getOrCreateSession(sessionID, containerID, shell string) *sessionH
 			hub:       h,
 			sessionID: sessionID,
 			terms:     make(map[string]*termHub),
+			nextSeq:   1, // main is seq 1; extras take 2, 3, …
 		}
 		h.sessions[sessionID] = sh
 	}
@@ -180,6 +182,29 @@ func (h *Hub) LastOutputAt(sessionID string) int64 {
 		}
 	}
 	return latest
+}
+
+// TermInfo describes one live terminal of a session.
+type TermInfo struct {
+	ID      string `json:"id"`
+	Seq     int    `json:"seq"`     // 1 for the main terminal, 2,3,… for extras
+	Clients int    `json:"clients"` // attached sockets
+}
+
+// ListTerms returns the session's live terminals ordered by seq. It returns
+// nil when the session has no hub entry.
+func (h *Hub) ListTerms(sessionID string) []TermInfo {
+	sh := h.get(sessionID)
+	if sh == nil {
+		return nil
+	}
+	terms := sh.termList()
+	out := make([]TermInfo, 0, len(terms))
+	for _, th := range terms {
+		out = append(out, TermInfo{ID: th.termID, Seq: th.seq, Clients: th.count()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	return out
 }
 
 // wsOut is one outbound frame: binary=true for PTY bytes, false for JSON
@@ -289,6 +314,7 @@ type sessionHub struct {
 	containerID string
 	shell       string
 	terms       map[string]*termHub // key: termID
+	nextSeq     int                 // next seq for an extra terminal (main is always 1)
 }
 
 func (s *sessionHub) getOrCreateTerm(termID string) *termHub {
@@ -298,9 +324,17 @@ func (s *sessionHub) getOrCreateTerm(termID string) *termHub {
 		return th
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	// The main terminal is always seq 1; extras take 2, 3, … in creation
+	// order, so tab labels stay stable no matter which attaches first.
+	seq := 1
+	if termID != MainTermID {
+		s.nextSeq++
+		seq = s.nextSeq
+	}
 	th := &termHub{
 		session:     s,
 		termID:      termID,
+		seq:         seq,
 		persistent:  termID == MainTermID,
 		containerID: s.containerID,
 		shell:       s.shell,
@@ -344,6 +378,7 @@ func (s *sessionHub) shutdownAll(notice string) {
 type termHub struct {
 	session     *sessionHub
 	termID      string
+	seq         int  // display order: 1 = main, 2,3,… = extras
 	persistent  bool // main terminal: survives zero viewers, shell restarts
 	containerID string
 	shell       string

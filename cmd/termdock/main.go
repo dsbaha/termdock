@@ -136,6 +136,9 @@ func main() {
 	mux.Handle("GET /api/sessions/{id}/attach", authed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessH.Attach(w, r, r.PathValue("id"))
 	})))
+	mux.Handle("GET /api/sessions/{id}/terms", authed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessH.ListTerms(w, r, r.PathValue("id"))
+	})))
 	mux.Handle("POST /api/sessions/{id}/shares", authed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessH.CreateShare(w, r, r.PathValue("id"))
 	})))
