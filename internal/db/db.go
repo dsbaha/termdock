@@ -2,6 +2,7 @@
 package db
 
 import (
+	"strings"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -71,6 +72,7 @@ func (d *DB) migrate() error {
 			org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
 			image TEXT NOT NULL,
 			shell TEXT NOT NULL,
+			display TEXT NOT NULL DEFAULT 'terminal',
 			cpu REAL NOT NULL,
 			memory_mb INTEGER NOT NULL,
 			idle_minutes INTEGER NOT NULL,
@@ -114,6 +116,11 @@ func (d *DB) migrate() error {
 		if _, err := d.Exec(s); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
+	}
+	// Existing databases predate the display column.
+	if _, err := d.Exec(`ALTER TABLE sessions ADD COLUMN display TEXT NOT NULL DEFAULT 'terminal'`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("migrate: %w", err)
 	}
 	return nil
 }

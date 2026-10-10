@@ -28,6 +28,23 @@ func TerminalPage() http.Handler {
 	})
 }
 
+// DesktopPage serves the standalone popup desktop page (d.html). The page
+// itself carries no session data — it reads the session id from the URL path
+// and attaches to /api/sessions/{id}/vnc, which enforces authorization.
+// Callers must gate this behind authentication.
+func DesktopPage() http.Handler {
+	data, err := staticFiles.ReadFile("static/d.html")
+	if err != nil {
+		panic(err)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+	})
+}
+
 // NotAuthenticatedPage is shown in a popup window when the visitor has no
 // valid login session.
 func NotAuthenticatedPage() http.Handler {

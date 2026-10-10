@@ -334,6 +334,50 @@ func (c *Client) ResolveShell(ctx context.Context, containerID, want string) str
 	return "/bin/sh"
 }
 
+// ContainerIP returns the container's IP address on the TermDock network.
+func (c *Client) ContainerIP(ctx context.Context, containerID string) (string, error) {
+	insp, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("inspect container: %w", err)
+	}
+	if insp.NetworkSettings == nil {
+		return "", fmt.Errorf("no network settings for container")
+	}
+	// Prefer the TermDock network, fall back to any address.
+	if insp.NetworkSettings.Networks != nil {
+		if n, ok := insp.NetworkSettings.Networks[NetworkName]; ok && n.IPAddress != "" {
+			return n.IPAddress, nil
+		}
+		for _, n := range insp.NetworkSettings.Networks {
+			if n.IPAddress != "" {
+				return n.IPAddress, nil
+			}
+		}
+	}
+	if insp.NetworkSettings.IPAddress != "" {
+		return insp.NetworkSettings.IPAddress, nil
+	}
+	return "", fmt.Errorf("no IP address for container")
+}
+
+// ExecDetached runs cmd in the container without attaching: for daemons like
+// Xvfb. Env entries are "KEY=VALUE" strings.
+func (c *Client) ExecDetached(ctx context.Context, containerID string, env []string, cmd ...string) error {
+	execResp, err := c.cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd:          cmd,
+		Env:          env,
+		AttachStdout: false,
+		AttachStderr: false,
+	})
+	if err != nil {
+		return fmt.Errorf("exec create: %w", err)
+	}
+	if err := c.cli.ContainerExecStart(ctx, execResp.ID, container.ExecStartOptions{Detach: true}); err != nil {
+		return fmt.Errorf("exec start: %w", err)
+	}
+	return nil
+}
+
 // StopAndRemove stops (10s grace) and force-removes a container. The volume is
 // kept so the session's /workspace survives restarts.
 func (c *Client) StopAndRemove(ctx context.Context, containerID string) error {

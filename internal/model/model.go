@@ -26,6 +26,12 @@ const (
 	SessionError    = "error"
 )
 
+// Display types.
+const (
+	DisplayTerminal = "terminal"
+	DisplayDesktop  = "desktop" // X11 via Xvfb + VNC
+)
+
 // CustomImage statuses.
 const (
 	CustomImageIdle     = "idle"
@@ -79,6 +85,7 @@ type Session struct {
 	OrgID        string
 	Image        string
 	Shell        string
+	Display      string // terminal | desktop
 	CPU          float64
 	MemoryMB     int
 	IdleMinutes  int

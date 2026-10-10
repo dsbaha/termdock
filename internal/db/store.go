@@ -171,20 +171,20 @@ type OrgMemberView struct {
 
 func (d *DB) CreateSession(s *model.Session) error {
 	_, err := d.Exec(`INSERT INTO sessions
-		(id, name, org_id, image, shell, cpu, memory_mb, idle_minutes, volume, container_id,
+		(id, name, org_id, image, shell, display, cpu, memory_mb, idle_minutes, volume, container_id,
 		 status, status_msg, created_by, created_at, last_active_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		s.ID, s.Name, s.OrgID, s.Image, s.Shell, s.CPU, s.MemoryMB, s.IdleMinutes,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		s.ID, s.Name, s.OrgID, s.Image, s.Shell, s.Display, s.CPU, s.MemoryMB, s.IdleMinutes,
 		s.Volume, s.ContainerID, s.Status, s.StatusMsg, s.CreatedBy, s.CreatedAt, s.LastActiveAt)
 	return err
 }
 
 func (d *DB) GetSession(id string) (*model.Session, error) {
 	var s model.Session
-	err := d.QueryRow(`SELECT id, name, org_id, image, shell, cpu, memory_mb, idle_minutes,
+	err := d.QueryRow(`SELECT id, name, org_id, image, shell, display, cpu, memory_mb, idle_minutes,
 		volume, container_id, status, status_msg, created_by, created_at, last_active_at
 		FROM sessions WHERE id = ?`, id).
-		Scan(&s.ID, &s.Name, &s.OrgID, &s.Image, &s.Shell, &s.CPU, &s.MemoryMB, &s.IdleMinutes,
+		Scan(&s.ID, &s.Name, &s.OrgID, &s.Image, &s.Shell, &s.Display, &s.CPU, &s.MemoryMB, &s.IdleMinutes,
 			&s.Volume, &s.ContainerID, &s.Status, &s.StatusMsg, &s.CreatedBy, &s.CreatedAt, &s.LastActiveAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -198,7 +198,7 @@ func (d *DB) GetSession(id string) (*model.Session, error) {
 // ListVisibleSessions returns sessions in orgID (if the caller names one they
 // belong to) plus any sessions shared directly with the user.
 func (d *DB) ListVisibleSessions(userID, orgID string) ([]model.Session, error) {
-	const cols = `SELECT DISTINCT s.id, s.name, s.org_id, s.image, s.shell, s.cpu,
+	const cols = `SELECT DISTINCT s.id, s.name, s.org_id, s.image, s.shell, s.display, s.cpu,
 		s.memory_mb, s.idle_minutes, s.volume, s.container_id, s.status, s.status_msg,
 		s.created_by, s.created_at, s.last_active_at
 		FROM sessions s
@@ -224,7 +224,7 @@ func (d *DB) ListVisibleSessions(userID, orgID string) ([]model.Session, error) 
 	var out []model.Session
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Name, &s.OrgID, &s.Image, &s.Shell, &s.CPU, &s.MemoryMB,
+		if err := rows.Scan(&s.ID, &s.Name, &s.OrgID, &s.Image, &s.Shell, &s.Display, &s.CPU, &s.MemoryMB,
 			&s.IdleMinutes, &s.Volume, &s.ContainerID, &s.Status, &s.StatusMsg,
 			&s.CreatedBy, &s.CreatedAt, &s.LastActiveAt); err != nil {
 			return nil, err
@@ -239,7 +239,7 @@ func (d *DB) ListSessionsByStatus(statuses ...string) ([]model.Session, error) {
 	if len(statuses) == 0 {
 		return nil, nil
 	}
-	q := `SELECT id, name, org_id, image, shell, cpu, memory_mb, idle_minutes,
+	q := `SELECT id, name, org_id, image, shell, display, cpu, memory_mb, idle_minutes,
 		volume, container_id, status, status_msg, created_by, created_at, last_active_at
 		FROM sessions WHERE status IN (`
 	args := make([]any, 0, len(statuses))
@@ -259,7 +259,7 @@ func (d *DB) ListSessionsByStatus(statuses ...string) ([]model.Session, error) {
 	var out []model.Session
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Name, &s.OrgID, &s.Image, &s.Shell, &s.CPU, &s.MemoryMB,
+		if err := rows.Scan(&s.ID, &s.Name, &s.OrgID, &s.Image, &s.Shell, &s.Display, &s.CPU, &s.MemoryMB,
 			&s.IdleMinutes, &s.Volume, &s.ContainerID, &s.Status, &s.StatusMsg,
 			&s.CreatedBy, &s.CreatedAt, &s.LastActiveAt); err != nil {
 			return nil, err
@@ -453,6 +453,34 @@ func (d *DB) CreateCustomImage(c *model.CustomImage) error {
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		c.ID, c.Name, c.Dockerfile, c.Status, c.StatusMsg, c.CreatedAt, c.UpdatedAt)
 	return err
+}
+
+// DesktopDockerfile is the seeded custom image for desktop (X11/VNC)
+// sessions. It provides Xvfb, openbox, and x11vnc; TermDock starts the X
+// stack at provision time.
+const DesktopDockerfile = `FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb openbox x11vnc \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+`
+
+// EnsureDesktopCustomImage seeds the "desktop" custom image when missing.
+func (d *DB) EnsureDesktopCustomImage(now int64) error {
+	existing, err := d.GetCustomImageByName("desktop")
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return nil
+	}
+	return d.CreateCustomImage(&model.CustomImage{
+		ID:         NewID(),
+		Name:       "desktop",
+		Dockerfile: DesktopDockerfile,
+		Status:     model.CustomImageIdle,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
 }
 
 func (d *DB) UpdateCustomImage(c *model.CustomImage) error {

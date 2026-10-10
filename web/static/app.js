@@ -1,6 +1,7 @@
 /* TermDock dashboard — vanilla JS. Terminal handling lives in the shared
  * module terminal.js (also used by the /t/{id} popup page). */
 import { TermDockTerminal } from '/terminal.js';
+import { DesktopViewer } from '/desktop.js';
 
 'use strict';
 
@@ -197,9 +198,10 @@ function renderSessionList() {
       if (k.startsWith(s.id + ':') && v === 'running') { active = true; break; }
     }
     const actTag = active ? ' · <span class="act-running">● running</span>' : '';
+    const dispTag = s.display === 'desktop' ? '🖥️ ' : '';
     item.innerHTML = `<div class="name"><span class="dot ${s.status}"></span><span></span></div>
       <div class="meta">${statusLabel(s)}${actTag}${roleTag} · ${s.image}</div>`;
-    item.querySelector('.name span:last-child').textContent = s.name;
+    item.querySelector('.name span:last-child').textContent = dispTag + s.name;
     item.onclick = () => openTab(s.id);
     list.appendChild(item);
   }
@@ -226,8 +228,12 @@ function syncTabs() {
 
 // Open (or focus) a terminal tab. termId defaults to the session's persistent
 // "main" terminal; extra terminals get client-generated IDs, each backed by
-// its own shell (docker exec) in the same container.
+// its own shell (docker exec) in the same container. Desktop sessions open a
+// single VNC tab instead (no terminal tabs).
 function openTab(sessionId, termId, opts) {
+  const s = S.sessions.find((x) => x.id === sessionId);
+  if (!s) return;
+  if (s.display === 'desktop') return openDesktopTab(s, opts || {});
   termId = termId || 'main';
   opts = opts || {};
   const key = tabKey(sessionId, termId);
@@ -235,8 +241,6 @@ function openTab(sessionId, termId, opts) {
     if (opts.activate !== false) activateTab(key);
     return;
   }
-  const s = S.sessions.find((x) => x.id === sessionId);
-  if (!s) return;
 
   $('empty-state').style.display = 'none';
 
@@ -300,6 +304,90 @@ function openTab(sessionId, termId, opts) {
   }
 }
 
+// Open (or focus) a desktop session's VNC tab. One tab per session —
+// desktops have no terminal tabs.
+function openDesktopTab(s, opts) {
+  const key = tabKey(s.id, 'main');
+  if (S.tabs.has(key)) {
+    if (opts.activate !== false) activateTab(key);
+    return;
+  }
+  $('empty-state').style.display = 'none';
+
+  const tabEl = document.createElement('div');
+  tabEl.className = 'tab';
+  tabEl.innerHTML = `<span class="dot ${s.status}"></span><span class="tab-name">🖥️ </span>
+    <button class="tab-close" title="Close tab">×</button>`;
+  tabEl.querySelector('.tab-name').appendChild(document.createTextNode(s.name));
+  tabEl.onclick = (e) => {
+    if (e.target.classList.contains('tab-close')) closeTab(key);
+    else activateTab(key);
+  };
+
+  const panelEl = document.createElement('div');
+  panelEl.className = 'tab-panel';
+  panelEl.innerHTML = `
+    <div class="viewer-banner hidden">View only — you are watching this desktop.</div>
+    <div class="toolbar">
+      <span class="td-badge-slot"></span>
+      <span class="status-text"></span>
+      <div class="spacer"></div>
+      <button class="btn small ghost share-btn">Share</button>
+      <button class="btn small ghost popout-btn" title="Open in a popup window">⧉ Pop out</button>
+      <button class="btn small ghost toggle-btn"></button>
+      <button class="btn small danger delete-btn">Delete</button>
+    </div>
+    <div class="desktop-wrap"></div>`;
+
+  $('tab-bar').insertBefore(tabEl, $('new-term-btn'));
+  $('tab-panels').appendChild(panelEl);
+
+  const tab = { key, sessionId: s.id, termId: 'main', label: s.name, session: s, tabEl, panelEl, dview: null, isDesktop: true };
+  S.tabs.set(key, tab);
+
+  panelEl.querySelector('.share-btn').onclick = () => openShareModal(s.id);
+  panelEl.querySelector('.popout-btn').onclick = () => {
+    window.open(`/d/${s.id}`, '_blank', 'width=1280,height=800');
+  };
+  panelEl.querySelector('.toggle-btn').onclick = () => toggleSession(tab);
+  panelEl.querySelector('.delete-btn').onclick = () => deleteSession(tab);
+
+  if (s.my_role === 'viewer') {
+    panelEl.querySelector('.viewer-banner').classList.remove('hidden');
+  }
+  if (opts.activate !== false) activateTab(key);
+  attachDesktop(tab);
+}
+
+// Connect the VNC viewer for a desktop tab. Waits for the session to be
+// running first (provision starts the X stack before marking running).
+function attachDesktop(tab) {
+  const wrap = tab.panelEl.querySelector('.desktop-wrap');
+  if (tab.dview) tab.dview.destroy();
+  const role = tab.session.my_role || 'owner';
+  const viewer = new DesktopViewer(wrap, tab.sessionId, role);
+  tab.dview = viewer;
+  viewer.onStatus = (text) => {
+    const el = tab.panelEl.querySelector('.status-text');
+    if (el && text) el.textContent = `${tab.session.image} · VNC · ${text}`;
+  };
+  if (tab.session.status === 'running') {
+    viewer.connect();
+  } else {
+    viewer.setStatus('Waiting for desktop to start…', false);
+    const t = setInterval(() => {
+      const s = S.sessions.find((x) => x.id === tab.sessionId);
+      if (!s || !S.tabs.has(tab.key)) { clearInterval(t); return; }
+      tab.session = s;
+      if (s.status === 'running') { clearInterval(t); viewer.connect(); }
+      else if (s.status === 'error') {
+        clearInterval(t);
+        viewer.setStatus('Error: ' + (s.status_msg || 'failed to start'), false);
+      }
+    }, 2000);
+  }
+}
+
 // The server assigns each terminal a stable seq (1 = main, 2,3,… = extras);
 // label tabs "name" / "name (2)" / … so the dashboard and popups agree.
 async function refreshTabLabel(tab) {
@@ -329,6 +417,7 @@ function closeTab(key) {
   const tab = S.tabs.get(key);
   if (!tab) return;
   if (tab.tterm) tab.tterm.close();
+  if (tab.dview) tab.dview.destroy();
   tab.tabEl.remove();
   tab.panelEl.remove();
   S.tabs.delete(key);
@@ -343,6 +432,7 @@ function newTerminalTab() {
   if (!active) return toast('Open a terminal first, then add another tab to its container.');
   const s = S.sessions.find((x) => x.id === active.sessionId);
   if (!s) return;
+  if (s.display === 'desktop') return toast('Desktop sessions have a single VNC view — no extra tabs.');
   if (s.my_role === 'viewer') return toast('Viewers cannot open new terminals.');
   const termId = 't-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   openTab(s.id, termId);
@@ -467,6 +557,7 @@ function initNewSessionModal() {
       org_id: $('ns-org').value,
       image: image || undefined,
       shell: $('ns-shell').value.trim() || undefined,
+      display: $('ns-display').value || undefined,
       cpu: parseFloat($('ns-cpu').value) || undefined,
       memory_mb: parseInt($('ns-memory').value, 10) || undefined,
       idle_minutes: Number.isNaN(idleVal) ? undefined : idleVal,
@@ -572,6 +663,8 @@ function startPolling() {
 async function syncTerminalTabs() {
   const sessionIds = new Set([...S.tabs.values()].map((t) => t.sessionId));
   for (const sessionId of sessionIds) {
+    const s0 = S.sessions.find((x) => x.id === sessionId);
+    if (s0 && s0.display === 'desktop') continue; // desktops have no terminal tabs
     let r;
     try {
       r = await api('GET', `/api/sessions/${sessionId}/terms`);

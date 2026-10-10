@@ -84,6 +84,10 @@ func main() {
 	if err := database.EnsureDefaultAllowedImage(cfg.DefaultImage, db.Now()); err != nil {
 		log.Printf("seed allowed images: %v", err)
 	}
+	// Seed the desktop custom image so X11/VNC sessions work out of the box.
+	if err := database.EnsureDesktopCustomImage(db.Now()); err != nil {
+		log.Printf("seed desktop image: %v", err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -139,6 +143,9 @@ func main() {
 	mux.Handle("GET /api/sessions/{id}/terms", authed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessH.ListTerms(w, r, r.PathValue("id"))
 	})))
+	mux.Handle("GET /api/sessions/{id}/vnc", authed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessH.VNCProxy(w, r, r.PathValue("id"))
+	})))
 	mux.Handle("POST /api/sessions/{id}/shares", authed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessH.CreateShare(w, r, r.PathValue("id"))
 	})))
@@ -169,6 +176,16 @@ func main() {
 			return
 		}
 		web.TerminalPage().ServeHTTP(w, r)
+	})
+
+	// Standalone popup desktop page. Same auth gating as /t/{id}; the VNC
+	// websocket enforces session authorization and the viewer role.
+	mux.HandleFunc("GET /d/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if authH.Authenticate(r) == nil {
+			web.NotAuthenticatedPage().ServeHTTP(w, r)
+			return
+		}
+		web.DesktopPage().ServeHTTP(w, r)
 	})
 
 	// Frontend.

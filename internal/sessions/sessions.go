@@ -6,7 +6,9 @@ package sessions
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -86,6 +88,7 @@ func sessionView(s *model.Session, myRole string) map[string]any {
 		"org_id":         s.OrgID,
 		"image":          s.Image,
 		"shell":          s.Shell,
+		"display":        s.Display,
 		"cpu":            s.CPU,
 		"memory_mb":      s.MemoryMB,
 		"idle_minutes":   s.IdleMinutes,
@@ -111,6 +114,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		OrgID       string  `json:"org_id"`
 		Image       string  `json:"image"`
 		Shell       string  `json:"shell"`
+		Display     string  `json:"display"` // terminal (default) | desktop
 		CPU         float64 `json:"cpu"`
 		MemoryMB    int     `json:"memory_mb"`
 		IdleMinutes *int    `json:"idle_minutes"`
@@ -194,6 +198,14 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "name must be at most 64 characters")
 		return
 	}
+	display := strings.ToLower(strings.TrimSpace(req.Display))
+	if display == "" {
+		display = model.DisplayTerminal
+	}
+	if display != model.DisplayTerminal && display != model.DisplayDesktop {
+		writeErr(w, http.StatusBadRequest, "display must be terminal or desktop")
+		return
+	}
 
 	id := db.NewID()
 	now := db.Now()
@@ -203,6 +215,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		OrgID:        req.OrgID,
 		Image:        image,
 		Shell:        shell,
+		Display:      display,
 		CPU:          cpu,
 		MemoryMB:     mem,
 		IdleMinutes:  idle,
@@ -297,12 +310,78 @@ func (h *Handler) provision(sessionID string) {
 	if shell != sess.Shell {
 		_ = h.DB.UpdateSessionShell(sessionID, shell)
 	}
+	// For desktop sessions, start the X stack (Xvfb + window manager + VNC)
+	// so the display is up before the session is marked running.
+	if sess.Display == model.DisplayDesktop {
+		log.Printf("provision %s: starting X stack", sessionID)
+		set(model.SessionCreating, "starting desktop")
+		if err := h.startXStack(ctx, containerID); err != nil {
+			fail("desktop start failed: " + err.Error())
+			return
+		}
+		log.Printf("provision %s: X stack up", sessionID)
+	}
+
 	log.Printf("provision %s: shell=%s, marking running", sessionID, shell)
 	if err := h.DB.UpdateSessionContainer(sessionID, containerID, model.SessionRunning); err != nil {
 		fail("database error: " + err.Error())
 		return
 	}
 	_ = h.DB.TouchSession(sessionID, db.Now())
+}
+
+// X display layout for desktop sessions.
+const (
+	xDisplay    = ":99"
+	xScreen     = "1920x1080x24"
+	xVNCPort    = 5900
+	xVNCPortStr = "5900"
+)
+
+// startXStack launches Xvfb, a window manager, and x11vnc inside a desktop
+// session's container, then waits for the VNC port to accept connections.
+// The image must provide the X stack binaries (see the seeded "desktop"
+// custom image); otherwise this returns a descriptive error.
+func (h *Handler) startXStack(ctx context.Context, containerID string) error {
+	// Xvfb first: everything else needs the display socket.
+	if err := h.Docker.ExecDetached(ctx, containerID, nil,
+		"Xvfb", xDisplay, "-screen", "0", xScreen); err != nil {
+		return fmt.Errorf("Xvfb: %w (image needs the xvfb package)", err)
+	}
+	// Give Xvfb a moment to create the socket, then start the WM and VNC.
+	time.Sleep(2 * time.Second)
+	if err := h.Docker.ExecDetached(ctx, containerID,
+		[]string{"DISPLAY=" + xDisplay}, "openbox"); err != nil {
+		return fmt.Errorf("openbox: %w (image needs the openbox package)", err)
+	}
+	if err := h.Docker.ExecDetached(ctx, containerID, nil,
+		"x11vnc", "-display", xDisplay, "-forever", "-shared", "-nopw",
+		"-listen", "0.0.0.0", "-rfbport", xVNCPortStr); err != nil {
+		return fmt.Errorf("x11vnc: %w (image needs the x11vnc package)", err)
+	}
+	// Wait for the VNC port to come up.
+	ip, err := h.Docker.ContainerIP(ctx, containerID)
+	if err != nil {
+		return fmt.Errorf("container IP: %w", err)
+	}
+	addr := net.JoinHostPort(ip, xVNCPortStr)
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		dctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		var d net.Dialer
+		c, derr := d.DialContext(dctx, "tcp", addr)
+		cancel()
+		if derr == nil {
+			c.Close()
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("VNC port %s not reachable after 30s", addr)
 }
 
 // List handles GET /api/sessions?org_id=. Without org_id it returns every
