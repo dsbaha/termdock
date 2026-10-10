@@ -140,6 +140,15 @@ export class TermDockTerminal {
     this._term.onData((data) => this._onInput(data));
 
     // Wait until the session is running (the "pushed to the page" moment).
+    // While waiting, show the backend's live progress (status_msg, e.g.
+    // "pulling image ubuntu:24.04") on one updating line so the terminal
+    // never looks dead during a slow first pull.
+    let lastMsg = null;
+    const showProgress = (msg) => {
+      if (msg === lastMsg) return;
+      lastMsg = msg;
+      this._term.write(`\r\x1b[K\x1b[33m⏳ ${msg}…\x1b[0m`);
+    };
     for (;;) {
       if (this._closed) return;
       const r = await this._api('GET', `/api/sessions/${this._sessionId}`);
@@ -151,18 +160,22 @@ export class TermDockTerminal {
       const st = r.data.status;
       if (st === 'running') break;
       if (st === 'error') {
-        this._term.writeln(`\r\n\x1b[31mSession failed to start: ${r.data.status_msg || 'unknown error'}\x1b[0m`);
+        this._term.write('\r\x1b[K');
+        this._term.writeln(`\x1b[31mSession failed to start: ${r.data.status_msg || 'unknown error'}\x1b[0m`);
         this._setState(TD_STATE.ERROR);
         return;
       }
       if (st === 'stopped') {
-        this._term.writeln('\r\n\x1b[33mSession is stopped. Start it to attach a terminal.\x1b[0m');
+        this._term.write('\r\x1b[K');
+        this._term.writeln('\x1b[33mSession is stopped. Start it to attach a terminal.\x1b[0m');
         this._setState(TD_STATE.STOPPED);
         return;
       }
+      showProgress(r.data.status_msg || st);
       await sleep(2000);
     }
     if (this._closed) return;
+    this._term.write('\r\x1b[K'); // clear the progress line
     this._connect();
   }
 
