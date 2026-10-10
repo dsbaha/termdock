@@ -233,7 +233,9 @@ function syncTabs() {
 function openTab(sessionId, termId, opts) {
   const s = S.sessions.find((x) => x.id === sessionId);
   if (!s) return;
-  if (s.display === 'desktop') return openDesktopTab(s, opts || {});
+  // Desktop sessions open the VNC view by default; a specific termId means
+  // "terminal tab into this container's shell".
+  if (s.display === 'desktop' && !termId) return openDesktopTab(s, opts || {});
   termId = termId || 'main';
   opts = opts || {};
   const key = tabKey(sessionId, termId);
@@ -432,7 +434,6 @@ function newTerminalTab() {
   if (!active) return toast('Open a terminal first, then add another tab to its container.');
   const s = S.sessions.find((x) => x.id === active.sessionId);
   if (!s) return;
-  if (s.display === 'desktop') return toast('Desktop sessions have a single VNC view — no extra tabs.');
   if (s.my_role === 'viewer') return toast('Viewers cannot open new terminals.');
   const termId = 't-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   openTab(s.id, termId);
@@ -663,8 +664,6 @@ function startPolling() {
 async function syncTerminalTabs() {
   const sessionIds = new Set([...S.tabs.values()].map((t) => t.sessionId));
   for (const sessionId of sessionIds) {
-    const s0 = S.sessions.find((x) => x.id === sessionId);
-    if (s0 && s0.display === 'desktop') continue; // desktops have no terminal tabs
     let r;
     try {
       r = await api('GET', `/api/sessions/${sessionId}/terms`);
@@ -690,15 +689,17 @@ function initAdmin() {
     e.preventDefault();
     const image = $('allowed-add-input').value.trim();
     if (!image) return;
-    const r = await api('POST', '/api/admin/images', { image });
+    const r = await api('POST', '/api/admin/images', { image, desktop: $('allowed-add-desktop').checked });
     if (!r.ok) return toast('Add failed: ' + apiError(r));
     $('allowed-add-input').value = '';
+    $('allowed-add-desktop').checked = false;
     await loadAllowedImages();
     await loadImageOptions(); // keep the new-terminal dropdown in sync
   };
   $('custom-new-btn').onclick = () => {
     $('custom-id').value = '';
     $('custom-name').value = '';
+    $('custom-desktop').checked = false;
     $('custom-name').disabled = false;
     $('custom-dockerfile').value = 'FROM ubuntu:24.04\n';
     $('custom-editor').classList.remove('hidden');
@@ -707,7 +708,7 @@ function initAdmin() {
   $('custom-editor').onsubmit = async (e) => {
     e.preventDefault();
     const id = $('custom-id').value;
-    const body = { name: $('custom-name').value.trim(), dockerfile: $('custom-dockerfile').value };
+    const body = { name: $('custom-name').value.trim(), dockerfile: $('custom-dockerfile').value, desktop: $('custom-desktop').checked };
     const r = id
       ? await api('PUT', `/api/admin/custom-images/${id}`, body)
       : await api('POST', '/api/admin/custom-images', body);
@@ -734,7 +735,7 @@ async function loadAllowedImages() {
     row.className = 'admin-row';
     const code = document.createElement('code');
     code.className = 'grow';
-    code.textContent = a.image;
+    code.textContent = a.image + (a.desktop ? '  🖥️ desktop' : '');
     const del = document.createElement('button');
     del.className = 'btn small danger';
     del.textContent = 'Remove';
@@ -762,7 +763,7 @@ async function loadCustomImages() {
     row.style.flexWrap = 'wrap';
     const code = document.createElement('code');
     code.className = 'grow';
-    code.textContent = `termdock/${c.name}:latest`;
+    code.textContent = `termdock/${c.name}:latest` + (c.desktop ? '  🖥️ desktop' : '');
     const tag = document.createElement('span');
     tag.className = 'status-tag ' + c.status;
     tag.textContent = c.status;
@@ -774,6 +775,7 @@ async function loadCustomImages() {
       $('custom-name').value = c.name;
       $('custom-name').disabled = false;
       $('custom-dockerfile').value = c.dockerfile;
+      $('custom-desktop').checked = !!c.desktop;
       $('custom-editor').classList.remove('hidden');
     };
     const build = document.createElement('button');
@@ -811,35 +813,52 @@ async function loadCustomImages() {
 // Fill the new-terminal image dropdown. Admins also get a "Custom…" entry
 // revealing a free-text field.
 async function loadImageOptions() {
-  const sel = $('ns-image');
   const r = await api('GET', '/api/images');
+  S.imageOptions = r.ok ? (r.data.images || []) : [];
+  renderImageOptions();
+}
+
+// The image dropdown is filtered by the selected display type: desktop
+// sessions only offer images flagged as providing an X stack, so you can't
+// pick a terminal-only image for a desktop (it would fail at Xvfb).
+function renderImageOptions() {
+  const sel = $('ns-image');
+  const prev = sel.value;
+  const wantDesktop = $('ns-display').value === 'desktop';
   sel.innerHTML = '';
-  if (r.ok) {
-    for (const o of r.data.images || []) {
-      const opt = document.createElement('option');
-      opt.value = o.image;
-      opt.textContent = o.custom ? `${o.image} (custom)` : o.image;
-      sel.appendChild(opt);
-    }
+  let kept = false;
+  for (const o of S.imageOptions || []) {
+    if (wantDesktop && !o.desktop) continue;
+    const opt = document.createElement('option');
+    opt.value = o.image;
+    opt.textContent = (o.custom ? `${o.image} (custom)` : o.image) + (o.desktop ? ' 🖥️' : '');
+    sel.appendChild(opt);
+    if (o.image === prev) kept = true;
   }
   if (S.user && S.user.is_admin) {
     const opt = document.createElement('option');
     opt.value = '__custom';
     opt.textContent = 'Custom…';
     sel.appendChild(opt);
+    if (prev === '__custom') kept = true;
   }
   if (!sel.options.length) {
     const opt = document.createElement('option');
     opt.value = '';
-    opt.textContent = '(no images available)';
+    opt.textContent = wantDesktop ? '(no desktop images available — ask an admin)' : '(no images available)';
     sel.appendChild(opt);
+  } else if (kept) {
+    sel.value = prev;
   }
+  $('ns-image-custom-wrap').classList.toggle('hidden', sel.value !== '__custom');
 }
 
 function initImageSelect() {
   $('ns-image').onchange = () => {
     $('ns-image-custom-wrap').classList.toggle('hidden', $('ns-image').value !== '__custom');
   };
+  // Re-filter the image list when the display type changes.
+  $('ns-display').onchange = () => renderImageOptions();
 }
 
 /* ---------------- Boot ---------------- */

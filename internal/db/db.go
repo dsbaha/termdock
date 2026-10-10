@@ -100,12 +100,14 @@ func (d *DB) migrate() error {
 		`CREATE TABLE IF NOT EXISTS allowed_images (
 			id TEXT PRIMARY KEY,
 			image TEXT NOT NULL UNIQUE,
+			desktop INTEGER NOT NULL DEFAULT 0,
 			created_at INTEGER NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS custom_images (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL UNIQUE,
 			dockerfile TEXT NOT NULL,
+			desktop INTEGER NOT NULL DEFAULT 0,
 			status TEXT NOT NULL DEFAULT 'idle',
 			status_msg TEXT NOT NULL DEFAULT '',
 			created_at INTEGER NOT NULL,
@@ -121,6 +123,16 @@ func (d *DB) migrate() error {
 	if _, err := d.Exec(`ALTER TABLE sessions ADD COLUMN display TEXT NOT NULL DEFAULT 'terminal'`); err != nil &&
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("migrate: %w", err)
+	}
+	// Existing databases predate the desktop flag on images.
+	for _, alter := range []string{
+		`ALTER TABLE allowed_images ADD COLUMN desktop INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE custom_images ADD COLUMN desktop INTEGER NOT NULL DEFAULT 0`,
+	} {
+		if _, err := d.Exec(alter); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate: %w", err)
+		}
 	}
 	return nil
 }

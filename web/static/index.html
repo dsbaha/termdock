@@ -80,6 +80,7 @@
         <div id="allowed-list" class="admin-list"></div>
         <form id="allowed-add-form" class="admin-add-row">
           <input id="allowed-add-input" type="text" placeholder="e.g. ubuntu:24.04" maxlength="256">
+          <label class="check"><input id="allowed-add-desktop" type="checkbox"> desktop (X11)</label>
           <button class="btn small" type="submit">Add</button>
         </form>
       </section>
@@ -97,6 +98,7 @@
           <label>Dockerfile
             <textarea id="custom-dockerfile" rows="14" spellcheck="false" placeholder="FROM ubuntu:24.04&#10;RUN apt-get update && apt-get install -y ..."></textarea>
           </label>
+          <label class="check"><input id="custom-desktop" type="checkbox"> Provides desktop (X11: xvfb + window manager + x11vnc)</label>
           <div class="modal-actions">
             <button type="button" id="custom-cancel-btn" class="btn ghost">Cancel</button>
             <button type="submit" class="btn primary">Save</button>

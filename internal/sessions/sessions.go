@@ -206,6 +206,20 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "display must be terminal or desktop")
 		return
 	}
+	// Desktop sessions need an image with an X stack. Known images carry a
+	// desktop flag; admin free-text images skip this check and fail
+	// descriptively at provision time if Xvfb is absent.
+	if display == model.DisplayDesktop {
+		provides, err := h.DB.ImageProvidesDesktop(image)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		if !provides {
+			writeErr(w, http.StatusBadRequest, "image \""+image+"\" is not marked as providing a desktop (X11); pick a desktop image or ask an admin")
+			return
+		}
+	}
 
 	id := db.NewID()
 	now := db.Now()

@@ -120,6 +120,7 @@ type AuthSession struct {
 type AllowedImage struct {
 	ID        string `json:"id"`
 	Image     string `json:"image"`
+	Desktop   bool   `json:"desktop"` // provides an X stack for desktop sessions
 	CreatedAt int64  `json:"created_at"`
 }
 
@@ -130,6 +131,7 @@ type CustomImage struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	Dockerfile string `json:"dockerfile"`
+	Desktop    bool   `json:"desktop"` // provides an X stack for desktop sessions
 	Status     string `json:"status"`
 	StatusMsg  string `json:"status_msg"`
 	CreatedAt  int64  `json:"created_at"`

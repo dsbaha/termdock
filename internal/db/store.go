@@ -360,7 +360,7 @@ func boolToInt(b bool) int {
 // ---------- images (admin-managed) ----------
 
 func (d *DB) ListAllowedImages() ([]model.AllowedImage, error) {
-	rows, err := d.Query(`SELECT id, image, created_at FROM allowed_images ORDER BY image`)
+	rows, err := d.Query(`SELECT id, image, desktop, created_at FROM allowed_images ORDER BY image`)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +368,7 @@ func (d *DB) ListAllowedImages() ([]model.AllowedImage, error) {
 	var out []model.AllowedImage
 	for rows.Next() {
 		var a model.AllowedImage
-		if err := rows.Scan(&a.ID, &a.Image, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Image, &a.Desktop, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -377,8 +377,8 @@ func (d *DB) ListAllowedImages() ([]model.AllowedImage, error) {
 }
 
 func (d *DB) AddAllowedImage(a *model.AllowedImage) error {
-	_, err := d.Exec(`INSERT INTO allowed_images (id, image, created_at) VALUES (?, ?, ?)`,
-		a.ID, a.Image, a.CreatedAt)
+	_, err := d.Exec(`INSERT INTO allowed_images (id, image, desktop, created_at) VALUES (?, ?, ?, ?)`,
+		a.ID, a.Image, a.Desktop, a.CreatedAt)
 	return err
 }
 
@@ -407,8 +407,32 @@ func (d *DB) IsImageAllowed(image string) (bool, error) {
 	return n > 0, nil
 }
 
+// ImageProvidesDesktop reports whether a known image (allowed list or custom)
+// is flagged as providing an X stack. Unknown images (admin free-text) return
+// true — provisioning will fail descriptively if the X stack is absent.
+func (d *DB) ImageProvidesDesktop(image string) (bool, error) {
+	var desktop bool
+	err := d.QueryRow(`SELECT desktop FROM allowed_images WHERE image = ?`, image).Scan(&desktop)
+	if err == nil {
+		return desktop, nil
+	}
+	if err != sql.ErrNoRows {
+		return false, err
+	}
+	if name, isCustom := model.ParseCustomImageName(image); isCustom {
+		c, cerr := d.GetCustomImageByName(name)
+		if cerr != nil {
+			return false, cerr
+		}
+		if c != nil {
+			return c.Desktop, nil
+		}
+	}
+	return true, nil
+}
+
 func (d *DB) ListCustomImages() ([]model.CustomImage, error) {
-	rows, err := d.Query(`SELECT id, name, dockerfile, status, status_msg, created_at, updated_at
+	rows, err := d.Query(`SELECT id, name, dockerfile, desktop, status, status_msg, created_at, updated_at
 		FROM custom_images ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -417,7 +441,7 @@ func (d *DB) ListCustomImages() ([]model.CustomImage, error) {
 	var out []model.CustomImage
 	for rows.Next() {
 		var c model.CustomImage
-		if err := rows.Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Desktop, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -435,9 +459,9 @@ func (d *DB) GetCustomImageByName(name string) (*model.CustomImage, error) {
 
 func (d *DB) getCustomImage(where, arg string) (*model.CustomImage, error) {
 	var c model.CustomImage
-	err := d.QueryRow(`SELECT id, name, dockerfile, status, status_msg, created_at, updated_at
+	err := d.QueryRow(`SELECT id, name, dockerfile, desktop, status, status_msg, created_at, updated_at
 		FROM custom_images WHERE `+where,
-		arg).Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt)
+		arg).Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Desktop, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -449,9 +473,9 @@ func (d *DB) getCustomImage(where, arg string) (*model.CustomImage, error) {
 
 func (d *DB) CreateCustomImage(c *model.CustomImage) error {
 	_, err := d.Exec(`INSERT INTO custom_images
-		(id, name, dockerfile, status, status_msg, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.Name, c.Dockerfile, c.Status, c.StatusMsg, c.CreatedAt, c.UpdatedAt)
+		(id, name, dockerfile, desktop, status, status_msg, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.Name, c.Dockerfile, c.Desktop, c.Status, c.StatusMsg, c.CreatedAt, c.UpdatedAt)
 	return err
 }
 
@@ -477,6 +501,7 @@ func (d *DB) EnsureDesktopCustomImage(now int64) error {
 		ID:         NewID(),
 		Name:       "desktop",
 		Dockerfile: DesktopDockerfile,
+		Desktop:    true,
 		Status:     model.CustomImageIdle,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -484,8 +509,8 @@ func (d *DB) EnsureDesktopCustomImage(now int64) error {
 }
 
 func (d *DB) UpdateCustomImage(c *model.CustomImage) error {
-	_, err := d.Exec(`UPDATE custom_images SET name = ?, dockerfile = ?, updated_at = ? WHERE id = ?`,
-		c.Name, c.Dockerfile, c.UpdatedAt, c.ID)
+	_, err := d.Exec(`UPDATE custom_images SET name = ?, dockerfile = ?, desktop = ?, updated_at = ? WHERE id = ?`,
+		c.Name, c.Dockerfile, c.Desktop, c.UpdatedAt, c.ID)
 	return err
 }
 

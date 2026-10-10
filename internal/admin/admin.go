@@ -63,9 +63,10 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 
 // imageOption is one entry in the new-terminal image dropdown.
 type imageOption struct {
-	Image  string `json:"image"`
-	Custom bool   `json:"custom"`
-	Name   string `json:"name,omitempty"` // custom image name
+	Image   string `json:"image"`
+	Custom  bool   `json:"custom"`
+	Name    string `json:"name,omitempty"` // custom image name
+	Desktop bool   `json:"desktop"`        // provides an X stack
 }
 
 // AvailableImages lists what the caller may run: the allowed list plus the
@@ -84,10 +85,10 @@ func (h *Handler) AvailableImages(w http.ResponseWriter, r *http.Request) {
 	}
 	var opts []imageOption
 	for _, a := range allowed {
-		opts = append(opts, imageOption{Image: a.Image})
+		opts = append(opts, imageOption{Image: a.Image, Desktop: a.Desktop})
 	}
 	for _, c := range custom {
-		opts = append(opts, imageOption{Image: model.CustomImageTag(c.Name), Custom: true, Name: c.Name})
+		opts = append(opts, imageOption{Image: model.CustomImageTag(c.Name), Custom: true, Name: c.Name, Desktop: c.Desktop})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"images": opts})
 }
@@ -167,6 +168,7 @@ func (h *Handler) CreateCustom(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name       string `json:"name"`
 		Dockerfile string `json:"dockerfile"`
+		Desktop    bool   `json:"desktop"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
@@ -186,6 +188,7 @@ func (h *Handler) CreateCustom(w http.ResponseWriter, r *http.Request) {
 		ID:         db.NewID(),
 		Name:       body.Name,
 		Dockerfile: body.Dockerfile,
+		Desktop:    body.Desktop,
 		Status:     model.CustomImageIdle,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -214,6 +217,7 @@ func (h *Handler) UpdateCustom(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name       string `json:"name"`
 		Dockerfile string `json:"dockerfile"`
+		Desktop    bool   `json:"desktop"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
@@ -230,6 +234,7 @@ func (h *Handler) UpdateCustom(w http.ResponseWriter, r *http.Request) {
 	}
 	c.Name = body.Name
 	c.Dockerfile = body.Dockerfile
+	c.Desktop = body.Desktop
 	c.UpdatedAt = db.Now()
 	if err := h.DB.UpdateCustomImage(c); err != nil {
 		writeErr(w, http.StatusInternalServerError, "database error: "+err.Error())
