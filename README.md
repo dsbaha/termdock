@@ -13,11 +13,27 @@ be revoked at any time — a revoked user's terminal window closes immediately.
 
 ## Quickstart
 
-Prerequisites: a host with Docker.
+Prerequisites: a host with Docker (or Podman — see below).
 
 ```bash
 docker compose up --build -d
 # open http://<host>:8080 — register the first user (it becomes admin)
+```
+
+### Podman
+
+Point TermDock at the Podman socket — Podman's Docker-compatible API covers
+everything TermDock uses (images, containers, volumes, networks, exec):
+
+```bash
+TERMDOCK_DOCKER_HOST=unix:///var/run/podman/podman.sock ./termdock
+```
+
+or with compose, mount the Podman socket at the usual path:
+
+```yaml
+volumes:
+  - /var/run/podman/podman.sock:/var/run/docker.sock
 ```
 
 That's it. Distribution and upgrades are a single self-contained binary: the
@@ -73,6 +89,7 @@ All config is environment variables:
 | `TERMDOCK_ADDR` | `:8080` | Listen address |
 | `TERMDOCK_DATA` | `./data` | Directory holding `termdock.db` |
 | `DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon (standard `DOCKER_*` env also honored) |
+| `TERMDOCK_DOCKER_HOST` | _(unset)_ | Override for the container runtime socket; takes precedence over `DOCKER_HOST`. Use `unix:///var/run/podman/podman.sock` on Podman hosts |
 | `TERMDOCK_REG_OPEN` | `true` | Allow self-registration (`false` disables `/api/auth/register`) |
 | `TERMDOCK_DEFAULT_IMAGE` | `ubuntu:24.04` | Default image for new sessions |
 | `TERMDOCK_IDLE_DEFAULT` | `60` | Default idle timeout in minutes (`0` = never) |

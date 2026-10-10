@@ -44,8 +44,18 @@ type Client struct {
 
 // New creates a Docker client from the environment (DOCKER_HOST and friends)
 // with API version negotiation.
+//
+// TERMDOCK_DOCKER_HOST, when set, takes precedence over DOCKER_HOST. It
+// exists so the socket is a first-class TermDock option alongside the other
+// TERMDOCK_* variables — e.g. TERMDOCK_DOCKER_HOST=unix:///var/run/podman/podman.sock
+// on Podman hosts (Podman's Docker-compatible API works for everything
+// TermDock needs: images, containers, volumes, networks, exec).
 func New() (*Client, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
+	if h := os.Getenv("TERMDOCK_DOCKER_HOST"); h != "" {
+		opts = append(opts, client.WithHost(h))
+	}
+	cli, err := client.NewClientWithOpts(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
