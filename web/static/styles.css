@@ -172,6 +172,19 @@ code { background: var(--bg3); padding: 1px 5px; border-radius: 4px; font-size: 
   cursor: pointer; font-size: 14px; padding: 0 2px;
 }
 .tab .tab-close:hover { color: var(--red); }
+.tab-add {
+  align-self: center;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 6px 10px;
+  margin-left: 4px;
+}
+.tab-add:hover { color: var(--accent); border-color: var(--accent); }
 .tab-panels { flex: 1; position: relative; min-height: 0; }
 .tab-panel {
   position: absolute; inset: 0;

@@ -53,6 +53,14 @@ TERMDOCK_DATA=./data ./termdock
   CPU / memory limits, and idle timeout. The session shows `starting…` while
   the image pulls and the container starts; the tab attaches automatically
   when it is `running`.
+- **Multiple terminals per container**: the **+** button in the tab bar opens
+  another tab with its own shell (`docker exec`) in the active tab's
+  container — tabs are labeled `name`, `name (2)`, `name (3)`, …. The sidebar
+  keeps listing containers, one row each. The first ("main") terminal is
+  persistent: closing its tab only detaches, and its shell restarts if it
+  exits. Extra terminals are ephemeral: their shell is torn down when the
+  last viewer leaves or the shell exits. Viewers can only watch the main
+  terminal; collaborators may open extra ones.
 - **Pop out**: every terminal tab has a **⧉ Pop out** button that opens the
   session in a standalone popup window (`/t/{id}`) — just the terminal
   filling the window, with the session name (and live status) in the window

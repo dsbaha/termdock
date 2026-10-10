@@ -55,8 +55,8 @@ func (f *fakePTY) input() string {
 
 // testServer spins up an httptest server whose handler upgrades the websocket
 // via the real hub.Upgrade adapter and attaches the resulting Stream to the
-// hub. Query params: role, user.
-func testServer(t *testing.T, h *Hub) (*httptest.Server, func(user, role string) *websocket.Conn) {
+// hub. Query params: role, user, term.
+func testServer(t *testing.T, h *Hub) (*httptest.Server, func(user, role, term string) *websocket.Conn) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		stream, err := Upgrade(w, r)
@@ -64,11 +64,12 @@ func testServer(t *testing.T, h *Hub) (*httptest.Server, func(user, role string)
 			return
 		}
 		h.Attach(r.Context(), "sess1", "ctr1", "/bin/bash",
+			r.URL.Query().Get("term"),
 			r.URL.Query().Get("user"), r.URL.Query().Get("role"), stream)
 	}))
-	dial := func(user, role string) *websocket.Conn {
+	dial := func(user, role, term string) *websocket.Conn {
 		ws, _, err := websocket.DefaultDialer.Dial(
-			"ws"+strings.TrimPrefix(srv.URL, "http")+"/?user="+user+"&role="+role, nil)
+			"ws"+strings.TrimPrefix(srv.URL, "http")+"/?user="+user+"&role="+role+"&term="+term, nil)
 		if err != nil {
 			t.Fatalf("dial: %v", err)
 		}
@@ -100,9 +101,9 @@ func TestBroadcastToAllClients(t *testing.T) {
 	srv, dial := testServer(t, h)
 	defer srv.Close()
 
-	collab := dial("u1", "collaborator")
+	collab := dial("u1", "collaborator", "")
 	defer collab.Close()
-	viewer := dial("u2", "viewer")
+	viewer := dial("u2", "viewer", "")
 	defer viewer.Close()
 
 	time.Sleep(200 * time.Millisecond) // let both attach
@@ -129,9 +130,9 @@ func TestInputOnlyFromCollaborators(t *testing.T) {
 	srv, dial := testServer(t, h)
 	defer srv.Close()
 
-	collab := dial("u1", "collaborator")
+	collab := dial("u1", "collaborator", "")
 	defer collab.Close()
-	viewer := dial("u2", "viewer")
+	viewer := dial("u2", "viewer", "")
 	defer viewer.Close()
 	time.Sleep(200 * time.Millisecond)
 
@@ -158,9 +159,9 @@ func TestResizeOnlyFromCollaborators(t *testing.T) {
 	srv, dial := testServer(t, h)
 	defer srv.Close()
 
-	collab := dial("u1", "collaborator")
+	collab := dial("u1", "collaborator", "")
 	defer collab.Close()
-	viewer := dial("u2", "viewer")
+	viewer := dial("u2", "viewer", "")
 	defer viewer.Close()
 	time.Sleep(200 * time.Millisecond)
 
@@ -190,9 +191,9 @@ func TestCloseUserRevokesOnlyThatUser(t *testing.T) {
 	srv, dial := testServer(t, h)
 	defer srv.Close()
 
-	collab := dial("u1", "collaborator")
+	collab := dial("u1", "collaborator", "")
 	defer collab.Close()
-	viewer := dial("u2", "viewer")
+	viewer := dial("u2", "viewer", "")
 	defer viewer.Close()
 	time.Sleep(200 * time.Millisecond)
 
@@ -241,7 +242,7 @@ func TestOnInputCallback(t *testing.T) {
 	srv, dial := testServer(t, h)
 	defer srv.Close()
 
-	collab := dial("u1", "collaborator")
+	collab := dial("u1", "collaborator", "")
 	defer collab.Close()
 	time.Sleep(200 * time.Millisecond)
 
@@ -272,7 +273,7 @@ func TestRingBufferReplayedToLateAttacher(t *testing.T) {
 	defer srv.Close()
 
 	// First client attaches and receives live output.
-	first := dial("u1", "collaborator")
+	first := dial("u1", "collaborator", "")
 	time.Sleep(200 * time.Millisecond)
 	if _, err := fpty.w.Write([]byte("scrollback-line-1\nscrollback-line-2\n")); err != nil {
 		t.Fatal(err)
@@ -288,7 +289,7 @@ func TestRingBufferReplayedToLateAttacher(t *testing.T) {
 	}
 
 	// Late attacher must get the replayed scrollback, not a blank screen.
-	ws := dial("u2", "collaborator")
+	ws := dial("u2", "collaborator", "")
 	defer ws.Close()
 	_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
 	var sawReplay bool
@@ -316,5 +317,90 @@ func TestLastOutputAtZeroForUnknownSession(t *testing.T) {
 	}
 	if n := h.NumClients("nope"); n != 0 {
 		t.Fatalf("NumClients = %d, want 0", n)
+	}
+}
+
+func TestTerminalsAreIndependentPTYs(t *testing.T) {
+	ptys := make(map[string]*fakePTY)
+	var mu sync.Mutex
+	// The open func doesn't know the termID; return a fresh PTY per call and
+	// record them in order. Main is opened first, then the extra term.
+	h := New(func(ctx context.Context, _, _ string, _, _ uint) (PTYConn, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		f := newFakePTY()
+		ptys[string(rune('a'+len(ptys)))] = f
+		return f, nil
+	}, nil)
+	srv, dial := testServer(t, h)
+	defer srv.Close()
+
+	mainWS := dial("u1", "collaborator", "main")
+	defer mainWS.Close()
+	extraWS := dial("u1", "collaborator", "t-xyz")
+	defer extraWS.Close()
+	time.Sleep(300 * time.Millisecond)
+
+	if n := h.NumClients("sess1"); n != 2 {
+		t.Fatalf("NumClients = %d, want 2 across both terminals", n)
+	}
+	mu.Lock()
+	if len(ptys) != 2 {
+		mu.Unlock()
+		t.Fatalf("got %d PTYs, want 2 (one per terminal)", len(ptys))
+	}
+	var pa, pb *fakePTY
+	for _, f := range ptys {
+		if pa == nil {
+			pa = f
+		} else {
+			pb = f
+		}
+	}
+	mu.Unlock()
+
+	// Input on the main terminal must not reach the extra terminal's PTY.
+	if err := mainWS.WriteMessage(websocket.BinaryMessage, []byte("MAIN-DATA")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && pa.input()+pb.input() == "" {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := pa.input() + pb.input(); got != "MAIN-DATA" {
+		t.Fatalf("pty input = %q, want exactly MAIN-DATA on one pty", got)
+	}
+}
+
+func TestEphemeralTermShutsDownWhenShellExits(t *testing.T) {
+	h := New(func(ctx context.Context, _, _ string, _, _ uint) (PTYConn, error) {
+		f := newFakePTY()
+		f.w.Close() // EOF immediately: shell "exited" with no output
+		return f, nil
+	}, nil)
+	srv, dial := testServer(t, h)
+	defer srv.Close()
+
+	ws := dial("u1", "collaborator", "t-eph")
+	defer ws.Close()
+	// Expect a term-closed control frame telling the tab to close.
+	_ = ws.SetReadDeadline(time.Now().Add(10 * time.Second))
+	sawClosed := false
+	for !sawClosed {
+		mt, data, err := ws.ReadMessage()
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if mt == websocket.TextMessage && strings.Contains(string(data), "term-closed") {
+			sawClosed = true
+		}
+	}
+	// The terminal should be gone from the hub afterwards.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && h.NumClients("sess1") != 0 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := h.NumClients("sess1"); n != 0 {
+		t.Fatalf("NumClients = %d after ephemeral term exited, want 0", n)
 	}
 }

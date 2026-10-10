@@ -66,12 +66,15 @@ if (r.status === 401) {
 } else {
   name = r.data.name || name;
   document.getElementById('name').textContent = name;
+  const termId = new URLSearchParams(location.search).get('term') || 'main';
   const t = new TermDockTerminal({
     sessionId,
+    termId,
     api,
     updateTitle: true,
     titleName: name,
     notify: (msg) => console.log('[termdock]', msg),
+    onTermClosed: () => window.close(),
   });
   await t.open(document.getElementById('term'), document.getElementById('badge'));
   window.addEventListener('resize', () => t.refit());

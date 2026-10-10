@@ -9,8 +9,9 @@ const S = {
   orgs: [],
   currentOrg: 'all',
   sessions: [],
-  tabs: new Map(),      // sessionId -> tab state
-  termStates: new Map(), // sessionId -> terminal state ('waiting'|'running'|...)
+  tabs: new Map(),      // "sessionId:termId" -> tab state
+  termStates: new Map(), // "sessionId:termId" -> terminal state ('waiting'|'running'|...)
+  termSeq: {},           // sessionId -> next extra-terminal number for labels
 };
 
 const $ = (id) => document.getElementById(id);
@@ -190,8 +191,12 @@ function renderSessionList() {
     const item = document.createElement('div');
     item.className = 'session-item';
     const roleTag = s.my_role === 'viewer' ? ' · view-only' : '';
-    const termState = S.termStates.get(s.id);
-    const actTag = termState === 'running' ? ' · <span class="act-running">● running</span>' : '';
+    // Active if any of the session's terminals is running a command.
+    let active = false;
+    for (const [k, v] of S.termStates) {
+      if (k.startsWith(s.id + ':') && v === 'running') { active = true; break; }
+    }
+    const actTag = active ? ' · <span class="act-running">● running</span>' : '';
     item.innerHTML = `<div class="name"><span class="dot ${s.status}"></span><span></span></div>
       <div class="meta">${statusLabel(s)}${actTag}${roleTag} · ${s.image}</div>`;
     item.querySelector('.name span:last-child').textContent = s.name;
@@ -201,12 +206,16 @@ function renderSessionList() {
 }
 
 /* Keep open tabs in sync with session state (status text, toolbar). */
+function tabKey(sessionId, termId) {
+  return sessionId + ':' + (termId || 'main');
+}
+
 function syncTabs() {
-  for (const [id, tab] of S.tabs) {
-    const s = S.sessions.find((x) => x.id === id);
-    if (!s) { closeTab(id); continue; } // session was deleted
+  for (const [key, tab] of S.tabs) {
+    const s = S.sessions.find((x) => x.id === tab.sessionId);
+    if (!s) { closeTab(key); continue; } // session was deleted
     tab.session = s;
-    tab.tabEl.querySelector('.tab-name').textContent = s.name;
+    tab.tabEl.querySelector('.tab-name').textContent = tab.label;
     const dot = tab.tabEl.querySelector('.dot');
     if (dot) dot.className = 'dot ' + s.status;
     renderToolbar(tab);
@@ -215,9 +224,14 @@ function syncTabs() {
 
 /* ---------------- Tabs + terminal ---------------- */
 
-function openTab(sessionId) {
-  if (S.tabs.has(sessionId)) {
-    activateTab(sessionId);
+// Open (or focus) a terminal tab. termId defaults to the session's persistent
+// "main" terminal; extra terminals get client-generated IDs, each backed by
+// its own shell (docker exec) in the same container.
+function openTab(sessionId, termId) {
+  termId = termId || 'main';
+  const key = tabKey(sessionId, termId);
+  if (S.tabs.has(key)) {
+    activateTab(key);
     return;
   }
   const s = S.sessions.find((x) => x.id === sessionId);
@@ -225,14 +239,22 @@ function openTab(sessionId) {
 
   $('empty-state').style.display = 'none';
 
+  // Label extra terminals "name (2)", "name (3)", …; main keeps the bare name.
+  let label = s.name;
+  if (termId !== 'main') {
+    const n = (S.termSeq[sessionId] || 1) + 1;
+    S.termSeq[sessionId] = n;
+    label = `${s.name} (${n})`;
+  }
+
   const tabEl = document.createElement('div');
   tabEl.className = 'tab';
   tabEl.innerHTML = `<span class="dot ${s.status}"></span><span class="tab-name"></span>
     <button class="tab-close" title="Close tab">×</button>`;
-  tabEl.querySelector('.tab-name').textContent = s.name;
+  tabEl.querySelector('.tab-name').textContent = label;
   tabEl.onclick = (e) => {
-    if (e.target.classList.contains('tab-close')) closeTab(sessionId);
-    else activateTab(sessionId);
+    if (e.target.classList.contains('tab-close')) closeTab(key);
+    else activateTab(key);
   };
 
   const panelEl = document.createElement('div');
@@ -251,16 +273,17 @@ function openTab(sessionId) {
     </div>
     <div class="terminal-wrap"></div>`;
 
-  $('tab-bar').appendChild(tabEl);
+  $('tab-bar').insertBefore(tabEl, $('new-term-btn'));
   $('tab-panels').appendChild(panelEl);
 
-  const tab = { id: sessionId, session: s, tabEl, panelEl, tterm: null };
-  S.tabs.set(sessionId, tab);
+  const tab = { key, sessionId, termId, label, session: s, tabEl, panelEl, tterm: null };
+  S.tabs.set(key, tab);
 
   panelEl.querySelector('.share-btn').onclick = () => openShareModal(sessionId);
   // window.open directly in the click handler so popup blockers allow it.
   panelEl.querySelector('.popout-btn').onclick = () => {
-    window.open(`/t/${sessionId}`, '_blank', 'width=1000,height=700');
+    const q = termId === 'main' ? '' : `?term=${encodeURIComponent(termId)}`;
+    window.open(`/t/${sessionId}${q}`, '_blank', 'width=1000,height=700');
   };
   panelEl.querySelector('.toggle-btn').onclick = () => toggleSession(tab);
   panelEl.querySelector('.reconnect-btn').onclick = () => {
@@ -273,7 +296,7 @@ function openTab(sessionId) {
   };
   panelEl.querySelector('.delete-btn').onclick = () => deleteSession(tab);
 
-  activateTab(sessionId);
+  activateTab(key);
   try {
     attachTab(tab);
   } catch (e) {
@@ -283,27 +306,39 @@ function openTab(sessionId) {
   }
 }
 
-function activateTab(sessionId) {
+function activateTab(key) {
   for (const [id, t] of S.tabs) {
-    const active = id === sessionId;
+    const active = id === key;
     t.tabEl.classList.toggle('active', active);
     t.panelEl.classList.toggle('active', active);
     if (active && t.tterm) setTimeout(() => t.tterm.refit(), 30);
   }
 }
 
-// Closing a tab only detaches the websocket — the session, its container,
-// and its shell keep running. Reopening re-attaches to the same shell.
-function closeTab(sessionId) {
-  const tab = S.tabs.get(sessionId);
+// Closing a tab detaches the websocket. The main terminal's shell keeps
+// running server-side (reopening re-attaches to the same shell); an extra
+// terminal's shell is torn down once its last viewer leaves.
+function closeTab(key) {
+  const tab = S.tabs.get(key);
   if (!tab) return;
   if (tab.tterm) tab.tterm.close();
   tab.tabEl.remove();
   tab.panelEl.remove();
-  S.tabs.delete(sessionId);
-  S.termStates.delete(sessionId);
+  S.tabs.delete(key);
+  S.termStates.delete(key);
   if (!S.tabs.size) $('empty-state').style.display = '';
   renderSessionList();
+}
+
+// Open a new extra terminal (its own shell) in the active tab's container.
+function newTerminalTab() {
+  const active = [...S.tabs.values()].find((t) => t.tabEl.classList.contains('active'));
+  if (!active) return toast('Open a terminal first, then add another tab to its container.');
+  const s = S.sessions.find((x) => x.id === active.sessionId);
+  if (!s) return;
+  if (s.my_role === 'viewer') return toast('Viewers cannot open new terminals.');
+  const termId = 't-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  openTab(s.id, termId);
 }
 
 function renderToolbar(tab) {
@@ -324,7 +359,7 @@ function renderToolbar(tab) {
   // Manual reconnect when the terminal socket dropped (the terminal also
   // retries automatically a few times first).
   const reconnectBtn = tab.panelEl.querySelector('.reconnect-btn');
-  const termState = S.termStates.get(tab.id);
+  const termState = S.termStates.get(tab.key);
   reconnectBtn.classList.toggle('hidden',
     termState !== 'disconnected' && termState !== 'error');
 }
@@ -333,8 +368,8 @@ function renderToolbar(tab) {
 const toggleBusy = new Set();
 
 async function toggleSession(tab) {
-  if (toggleBusy.has(tab.id)) return;
-  toggleBusy.add(tab.id);
+  if (toggleBusy.has(tab.key)) return;
+  toggleBusy.add(tab.key);
   try {
     const s = tab.session;
     if (s.status === 'running') {
@@ -352,7 +387,7 @@ async function toggleSession(tab) {
     console.error('toggle session failed', e);
     toast('Operation failed: ' + (e && e.message ? e.message : e));
   } finally {
-    toggleBusy.delete(tab.id);
+    toggleBusy.delete(tab.key);
     await loadSessions();
   }
 }
@@ -361,7 +396,7 @@ async function deleteSession(tab) {
   if (!confirm(`Delete terminal "${tab.session.name}"? Its container and /workspace volume will be removed.`)) return;
   const r = await api('DELETE', `/api/sessions/${tab.session.id}`);
   if (!r.ok) return toast('Delete failed: ' + apiError(r));
-  closeTab(tab.id);
+  closeTab(tab.key);
   await loadSessions();
 }
 
@@ -371,17 +406,23 @@ function attachTab(tab) {
   const wrap = tab.panelEl.querySelector('.terminal-wrap');
   wrap.innerHTML = '';
   const tterm = new TermDockTerminal({
-    sessionId: tab.id,
+    sessionId: tab.sessionId,
+    termId: tab.termId,
     api,
     notify: (msg) => toast(msg),
     updateTitle: false, // dashboard keeps its own title
     onState: (state) => {
-      S.termStates.set(tab.id, state);
+      S.termStates.set(tab.key, state);
       renderSessionList(); // refresh the sidebar activity marker
       renderToolbar(tab);  // refresh the reconnect button
     },
     onRole: (role) => {
       tab.panelEl.querySelector('.viewer-banner').classList.toggle('hidden', role !== 'viewer');
+    },
+    onTermClosed: () => {
+      // Ephemeral extra terminal's shell exited: the tab is done.
+      toast(`Terminal "${tab.label}" closed (shell exited)`);
+      closeTab(tab.key);
     },
   });
   tab.tterm = tterm;
@@ -516,6 +557,7 @@ function startPolling() {
 document.addEventListener('DOMContentLoaded', () => {
   initNewSessionModal();
   initShareModal();
+  $('new-term-btn').onclick = () => newTerminalTab();
   window.addEventListener('resize', () => {
     for (const [id, t] of S.tabs) {
       if (t.panelEl.classList.contains('active') && t.tterm) t.tterm.refit();

@@ -52,19 +52,23 @@ export class TermDockTerminal {
   /**
    * @param {object} opts
    * @param {string} opts.sessionId
+   * @param {string} [opts.termId] terminal within the session ("main" default)
    * @param {(method, path, body) => Promise<{ok,status,data}>} opts.api
    * @param {(msg: string) => void} [opts.notify] sink for server notices
    * @param {(state: string) => void} [opts.onState] state-change callback
    * @param {(role: string) => void} [opts.onRole] role callback (viewer|cowlaborator)
+   * @param {() => void} [opts.onTermClosed] ephemeral terminal's shell exited
    * @param {boolean} [opts.updateTitle] update document.title with state
    * @param {string} [opts.titleName] base name for document.title
    */
   constructor(opts) {
     this._sessionId = opts.sessionId;
+    this._termId = opts.termId || 'main';
     this._api = opts.api;
     this._notify = opts.notify || (() => {});
     this._onState = opts.onState || (() => {});
     this._onRole = opts.onRole || (() => {});
+    this._onTermClosed = opts.onTermClosed || (() => {});
     this._updateTitle = !!opts.updateTitle;
     this._titleName = opts.titleName || 'terminal';
 
@@ -73,6 +77,7 @@ export class TermDockTerminal {
     this._ws = null;
     this._badgeEl = null;
     this._closed = false;
+    this._termDone = false; // server closed an ephemeral terminal; no reconnect
     this._state = TD_STATE.STARTING;
     this._role = null;
     this._sawOsc133 = false; // precise mode once a D sequence arrives
@@ -237,7 +242,8 @@ export class TermDockTerminal {
 
   _connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${location.host}/api/sessions/${this._sessionId}/attach`);
+    const q = this._termId && this._termId !== 'main' ? `?term=${encodeURIComponent(this._termId)}` : '';
+    const ws = new WebSocket(`${proto}//${location.host}/api/sessions/${this._sessionId}/attach${q}`);
     ws.binaryType = 'arraybuffer';
     this._ws = ws;
 
@@ -258,6 +264,10 @@ export class TermDockTerminal {
         } else if (msg.type === 'notice') {
           if (this._term) this._term.writeln(`\r\n\x1b[33m[termdock] ${msg.msg}\x1b[0m`);
           this._notify(msg.msg);
+        } else if (msg.type === 'term-closed') {
+          // Ephemeral terminal's shell exited server-side; don't reconnect.
+          this._termDone = true;
+          try { this._onTermClosed(); } catch (e) { console.error(e); }
         }
         return;
       }
@@ -266,7 +276,7 @@ export class TermDockTerminal {
 
     ws.onclose = () => {
       this._ws = null;
-      if (this._closed) return;
+      if (this._closed || this._termDone) return;
       this._setState(TD_STATE.DISCONNECTED);
       this._term.writeln('\r\n\x1b[31m[disconnected from terminal]\x1b[0m');
       this._scheduleReconnect();

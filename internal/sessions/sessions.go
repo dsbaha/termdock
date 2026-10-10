@@ -423,13 +423,43 @@ func (h *Handler) Attach(w http.ResponseWriter, r *http.Request, sessionID strin
 		writeErr(w, http.StatusConflict, "session is not running")
 		return
 	}
+	// Which terminal of the container to attach: the persistent "main"
+	// terminal by default, or a client-generated ID for extra tabs. Viewers
+	// only ever see the main terminal.
+	termID := r.URL.Query().Get("term")
+	if termID == "" {
+		termID = hub.MainTermID
+	}
+	if !validTermID(termID) {
+		writeErr(w, http.StatusBadRequest, "invalid term id")
+		return
+	}
+	if ac.role == model.ShareRoleViewer && termID != hub.MainTermID {
+		writeErr(w, http.StatusForbidden, "viewers can only watch the main terminal")
+		return
+	}
 	ws, err := hub.Upgrade(w, r)
 	if err != nil {
 		return
 	}
 	_ = h.DB.TouchSession(sessionID, db.Now())
 	// Blocks until the stream closes.
-	h.Hub.Attach(r.Context(), sess.ID, sess.ContainerID, sess.Shell, u.ID, ac.role, ws)
+	h.Hub.Attach(r.Context(), sess.ID, sess.ContainerID, sess.Shell, termID, u.ID, ac.role, ws)
+}
+
+// validTermID allows the fixed "main" ID and client-generated extra-terminal
+// IDs (alphanumeric, dash, underscore; bounded length).
+func validTermID(id string) bool {
+	if len(id) == 0 || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // CreateShare handles POST /api/sessions/{id}/shares {username, role}.
