@@ -245,6 +245,7 @@ function openTab(sessionId) {
       <div class="spacer"></div>
       <button class="btn small ghost share-btn">Share</button>
       <button class="btn small ghost popout-btn" title="Open in a popup window">⧉ Pop out</button>
+      <button class="btn small ghost reconnect-btn hidden">Reconnect</button>
       <button class="btn small ghost toggle-btn"></button>
       <button class="btn small danger delete-btn">Delete</button>
     </div>
@@ -262,6 +263,14 @@ function openTab(sessionId) {
     window.open(`/t/${sessionId}`, '_blank', 'width=1000,height=700');
   };
   panelEl.querySelector('.toggle-btn').onclick = () => toggleSession(tab);
+  panelEl.querySelector('.reconnect-btn').onclick = () => {
+    try {
+      attachTab(tab); // fresh terminal object; resets the auto-reconnect budget
+    } catch (e) {
+      console.error('reconnect failed', e);
+      toast('Reconnect failed: ' + (e && e.message ? e.message : e));
+    }
+  };
   panelEl.querySelector('.delete-btn').onclick = () => deleteSession(tab);
 
   activateTab(sessionId);
@@ -312,22 +321,40 @@ function renderToolbar(tab) {
     toggleBtn.textContent = 'Starting…';
     toggleBtn.disabled = true;
   }
+  // Manual reconnect when the terminal socket dropped (the terminal also
+  // retries automatically a few times first).
+  const reconnectBtn = tab.panelEl.querySelector('.reconnect-btn');
+  const termState = S.termStates.get(tab.id);
+  reconnectBtn.classList.toggle('hidden',
+    termState !== 'disconnected' && termState !== 'error');
 }
 
+// Guards toggleSession against double-clicks while a stop/start is in flight.
+const toggleBusy = new Set();
+
 async function toggleSession(tab) {
-  const s = tab.session;
-  if (s.status === 'running') {
-    const r = await api('POST', `/api/sessions/${s.id}/stop`);
-    if (!r.ok) toast('Stop failed: ' + apiError(r));
-  } else if (s.status === 'stopped' || s.status === 'error') {
-    const r = await api('POST', `/api/sessions/${s.id}/start`);
-    if (!r.ok) {
-      toast('Start failed: ' + apiError(r));
-    } else {
-      attachTab(tab); // re-arm the "wait until running" loop; fresh shell, same volume
+  if (toggleBusy.has(tab.id)) return;
+  toggleBusy.add(tab.id);
+  try {
+    const s = tab.session;
+    if (s.status === 'running') {
+      const r = await api('POST', `/api/sessions/${s.id}/stop`);
+      if (!r.ok) toast('Stop failed: ' + apiError(r));
+    } else if (s.status === 'stopped' || s.status === 'error') {
+      const r = await api('POST', `/api/sessions/${s.id}/start`);
+      if (!r.ok) {
+        toast('Start failed: ' + apiError(r));
+      } else {
+        attachTab(tab); // re-arm the "wait until running" loop; fresh shell, same volume
+      }
     }
+  } catch (e) {
+    console.error('toggle session failed', e);
+    toast('Operation failed: ' + (e && e.message ? e.message : e));
+  } finally {
+    toggleBusy.delete(tab.id);
+    await loadSessions();
   }
-  await loadSessions();
 }
 
 async function deleteSession(tab) {
@@ -351,6 +378,7 @@ function attachTab(tab) {
     onState: (state) => {
       S.termStates.set(tab.id, state);
       renderSessionList(); // refresh the sidebar activity marker
+      renderToolbar(tab);  // refresh the reconnect button
     },
     onRole: (role) => {
       tab.panelEl.querySelector('.viewer-banner').classList.toggle('hidden', role !== 'viewer');

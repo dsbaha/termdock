@@ -138,7 +138,14 @@ export class TermDockTerminal {
     this._setState(TD_STATE.STARTING);
     this._startTicker();
     this._term.onData((data) => this._onInput(data));
+    this._reconnects = 0;
 
+    await this._waitAndConnect();
+  }
+
+  // Poll until the session is running, then connect the websocket. Used both
+  // for the initial open and for automatic reconnects after a dropped socket.
+  async _waitAndConnect() {
     // Wait until the session is running (the "pushed to the page" moment).
     // While waiting, show the backend's live progress (status_msg, e.g.
     // "pulling image ubuntu:24.04") on one updating line so the terminal
@@ -179,12 +186,31 @@ export class TermDockTerminal {
     this._connect();
   }
 
+  // Schedule an automatic re-attach after an unexpected disconnect (e.g. the
+  // server restarted, or the session was stopped and resumed). Gives up after
+  // a few attempts and leaves the manual Reconnect button.
+  _scheduleReconnect() {
+    if (this._closed) return;
+    if (this._reconnects >= 5) {
+      this._term.writeln('\x1b[33m[not retrying automatically — use the Reconnect button above]\x1b[0m');
+      return;
+    }
+    this._reconnects++;
+    const delay = Math.min(2000 * this._reconnects, 10000);
+    this._term.writeln(`\x1b[33m[reconnecting in ${delay / 1000}s… (attempt ${this._reconnects}/5)]\x1b[0m`);
+    clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = setTimeout(() => {
+      if (!this._closed) this._waitAndConnect();
+    }, delay);
+  }
+
   /** Detach the websocket and dispose the terminal. Never touches the session. */
   close() {
     this._closed = true;
     clearInterval(this._tickTimer);
     clearTimeout(this._flashTimer);
     clearTimeout(this._resizeTimer);
+    clearTimeout(this._reconnectTimer);
     if (this._ro) {
       this._ro.disconnect();
       this._ro = null;
@@ -216,6 +242,7 @@ export class TermDockTerminal {
     this._ws = ws;
 
     ws.onopen = () => {
+      this._reconnects = 0; // a good connection resets the retry budget
       this._setState(TD_STATE.WAITING); // shell is (presumably) at a prompt
       this.refit();
     };
@@ -239,10 +266,10 @@ export class TermDockTerminal {
 
     ws.onclose = () => {
       this._ws = null;
-      if (!this._closed && this._term) {
-        this._setState(TD_STATE.DISCONNECTED);
-        this._term.writeln('\r\n\x1b[31m[disconnected from terminal]\x1b[0m');
-      }
+      if (this._closed) return;
+      this._setState(TD_STATE.DISCONNECTED);
+      this._term.writeln('\r\n\x1b[31m[disconnected from terminal]\x1b[0m');
+      this._scheduleReconnect();
     };
     ws.onerror = () => { try { ws.close(); } catch (e) { /* ignore */ } };
   }

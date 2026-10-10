@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 	"time"
 )
@@ -405,16 +406,24 @@ func (s *sessionHub) run() {
 		pty, err := s.hub.open(s.ctx, s.containerID, s.shell, cols, rows)
 		if err != nil {
 			failures++
-			s.noticeAll(fmt.Sprintf("could not start shell (attempt %d/%d): %v", failures, maxExecRetries, err))
+			log.Printf("hub: session %s exec open failed (attempt %d): %v", s.sessionID, failures, err)
+			s.noticeAll(fmt.Sprintf("could not start shell (attempt %d): %v", failures, err))
+			// A freshly (re)started container can take a moment before it
+			// accepts exec; back off between attempts (2s,4s,… capped at
+			// 10s) instead of failing fast.
 			if failures >= maxExecRetries {
-				s.noticeAll("terminal process failed to start; close and reopen the tab to retry")
+				s.noticeAll("terminal process failed to start; use the Reconnect button to retry")
 				s.shutdown("terminal unavailable")
 				s.hub.mu.Lock()
 				delete(s.hub.hubs, s.sessionID)
 				s.hub.mu.Unlock()
 				return
 			}
-			if !sleepCtx(s.ctx, time.Second) {
+			backoff := time.Duration(failures) * 2 * time.Second
+			if backoff > 10*time.Second {
+				backoff = 10 * time.Second
+			}
+			if !sleepCtx(s.ctx, backoff) {
 				return
 			}
 			continue
