@@ -284,3 +284,16 @@ replay, and the input-activity callback.
 - OIDC / proxy-auth mode (see above)
 - Share links (token URLs for view-only streaming without an account)
 - Per-org image allowlists and default resource quotas
+
+## Showcase
+
+<video src="docs/showcase/demo.mp4" controls width="100%"></video>
+
+### Dashboard — terminal sessions
+![TermDock dashboard with terminal sessions](docs/showcase/01-dashboard.png)
+
+### Desktop sessions via VNC
+![KDE Plasma desktop in a TermDock desktop session](docs/showcase/02-desktop.png)
+
+### Admin — live build progress
+![Custom image build with live progress bar](docs/showcase/03-admin.png)
