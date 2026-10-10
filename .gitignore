@@ -1,5 +1,5 @@
 # built binary (use the GitHub release instead)
-termdock
+/termdock
 dist/
 
 # local data dir
