@@ -265,7 +265,13 @@ function openTab(sessionId) {
   panelEl.querySelector('.delete-btn').onclick = () => deleteSession(tab);
 
   activateTab(sessionId);
-  attachTab(tab);
+  try {
+    attachTab(tab);
+  } catch (e) {
+    console.error('failed to attach terminal', e);
+    tab.panelEl.querySelector('.terminal-wrap').innerHTML =
+      `<div style="padding:24px;color:#ff7b72">Couldn't open the terminal view: ${(e && e.message) || e}<br>Close this tab and click the session in the sidebar to retry.</div>`;
+  }
 }
 
 function activateTab(sessionId) {

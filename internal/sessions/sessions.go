@@ -6,6 +6,7 @@ package sessions
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -208,11 +209,14 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 // provision runs the creating -> pulling -> running state machine in the
 // background. Any failure lands the session in status=error with a message.
+// Every step is logged so a stuck provision can be pinpointed from the
+// server log (e.g. a runtime whose exec API hangs).
 func (h *Handler) provision(sessionID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
 	fail := func(msg string) {
+		log.Printf("provision %s failed: %s", sessionID, msg)
 		_ = h.DB.UpdateSessionStatus(sessionID, model.SessionError, msg)
 	}
 	set := func(status, msg string) {
@@ -224,12 +228,14 @@ func (h *Handler) provision(sessionID string) {
 		return // session was deleted before we started
 	}
 
+	log.Printf("provision %s: pulling image %s", sessionID, sess.Image)
 	set(model.SessionPulling, "pulling image "+sess.Image)
 	if err := h.Docker.PullImage(ctx, sess.Image); err != nil {
 		fail("image pull failed: " + err.Error())
 		return
 	}
 
+	log.Printf("provision %s: creating container", sessionID)
 	set(model.SessionCreating, "creating container")
 	containerID, err := h.Docker.CreateAndStart(ctx, dockerx.CreateOptions{
 		SessionID: sess.ID,
@@ -242,11 +248,19 @@ func (h *Handler) provision(sessionID string) {
 		fail("container create failed: " + err.Error())
 		return
 	}
+	log.Printf("provision %s: container %s started", sessionID, containerID)
 
-	shell := h.Docker.ResolveShell(ctx, containerID, sess.Shell)
+	// Shell detection is best-effort and bounded: some runtimes (Podman)
+	// can hang on exec attach, and that must never wedge provisioning.
+	// On timeout we fall back to the requested shell.
+	log.Printf("provision %s: resolving shell", sessionID)
+	rctx, rcancel := context.WithTimeout(ctx, 15*time.Second)
+	shell := h.Docker.ResolveShell(rctx, containerID, sess.Shell)
+	rcancel()
 	if shell != sess.Shell {
 		_ = h.DB.UpdateSessionShell(sessionID, shell)
 	}
+	log.Printf("provision %s: shell=%s, marking running", sessionID, shell)
 	if err := h.DB.UpdateSessionContainer(sessionID, containerID, model.SessionRunning); err != nil {
 		fail("database error: " + err.Error())
 		return
