@@ -198,14 +198,25 @@ func (d *DB) GetSession(id string) (*model.Session, error) {
 // ListVisibleSessions returns sessions in orgID (if the caller names one they
 // belong to) plus any sessions shared directly with the user.
 func (d *DB) ListVisibleSessions(userID, orgID string) ([]model.Session, error) {
-	rows, err := d.Query(`SELECT DISTINCT s.id, s.name, s.org_id, s.image, s.shell, s.cpu,
+	const cols = `SELECT DISTINCT s.id, s.name, s.org_id, s.image, s.shell, s.cpu,
 		s.memory_mb, s.idle_minutes, s.volume, s.container_id, s.status, s.status_msg,
 		s.created_by, s.created_at, s.last_active_at
 		FROM sessions s
 		LEFT JOIN org_members m ON m.org_id = s.org_id AND m.user_id = ?
-		LEFT JOIN shares sh ON sh.session_id = s.id AND sh.user_id = ?
-		WHERE (s.org_id = ? AND m.user_id IS NOT NULL) OR sh.user_id IS NOT NULL
-		ORDER BY s.created_at DESC`, userID, userID, orgID)
+		LEFT JOIN shares sh ON sh.session_id = s.id AND sh.user_id = ?`
+	var rows *sql.Rows
+	var err error
+	if orgID == "" {
+		// No filter: every session in the user's orgs plus direct shares.
+		// (A bare `s.org_id = ?` with an empty orgID would match nothing.)
+		rows, err = d.Query(cols+`
+			WHERE m.user_id IS NOT NULL OR sh.user_id IS NOT NULL
+			ORDER BY s.created_at DESC`, userID, userID)
+	} else {
+		rows, err = d.Query(cols+`
+			WHERE (s.org_id = ? AND m.user_id IS NOT NULL) OR sh.user_id IS NOT NULL
+			ORDER BY s.created_at DESC`, userID, userID, orgID)
+	}
 	if err != nil {
 		return nil, err
 	}
