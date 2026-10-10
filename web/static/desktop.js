@@ -73,4 +73,16 @@ export class DesktopViewer {
     this.disconnect();
     this.container.innerHTML = '';
   }
+
+  /** Returns a PNG data URL of the current framebuffer (for LLM context). */
+  getScreenshot() {
+    const canvas = this.screen.querySelector('canvas');
+    if (!canvas) return null;
+    try {
+      return canvas.toDataURL('image/png');
+    } catch (e) {
+      return null;
+    }
+  }
+
 }

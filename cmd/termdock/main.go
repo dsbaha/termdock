@@ -153,6 +153,10 @@ func main() {
 	mux.Handle("POST /api/sessions/{id}/shares", authed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessH.CreateShare(w, r, r.PathValue("id"))
 	})))
+	mux.Handle("POST /api/sessions/{id}/llm-chat", authed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessH.LLMChat(w, r)
+	})))
+	mux.Handle("GET /api/llm-providers", authed(http.HandlerFunc(sessH.ListLLMProviders)))
 	mux.Handle("GET /api/sessions/{id}/shares", authed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessH.ListShares(w, r, r.PathValue("id"))
 	})))
@@ -170,6 +174,10 @@ func main() {
 	mux.Handle("PUT /api/admin/custom-images/{id}", authed(http.HandlerFunc(adminH.UpdateCustom)))
 	mux.Handle("DELETE /api/admin/custom-images/{id}", authed(http.HandlerFunc(adminH.DeleteCustom)))
 	mux.Handle("POST /api/admin/custom-images/{id}/build", authed(http.HandlerFunc(adminH.BuildCustom)))
+	mux.Handle("GET /api/admin/llm-providers", authed(http.HandlerFunc(adminH.ListLLM)))
+	mux.Handle("POST /api/admin/llm-providers", authed(http.HandlerFunc(adminH.CreateLLM)))
+	mux.Handle("PUT /api/admin/llm-providers/{id}", authed(http.HandlerFunc(adminH.UpdateLLM)))
+	mux.Handle("DELETE /api/admin/llm-providers/{id}", authed(http.HandlerFunc(adminH.DeleteLLM)))
 
 	// Standalone popup terminal page. Auth is checked here so an expired
 	// session gets a friendly message; authorization for the session itself

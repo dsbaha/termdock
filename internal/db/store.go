@@ -471,6 +471,57 @@ func (d *DB) getCustomImage(where, arg string) (*model.CustomImage, error) {
 	return &c, nil
 }
 
+// ---------- LLM providers ----------
+
+func (d *DB) CreateLLMProvider(p *model.LLMProvider) error {
+	_, err := d.Exec(`INSERT INTO llm_providers
+		(id, name, provider_type, endpoint, api_key, model, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.ProviderType, p.Endpoint, p.APIKey, p.Model, p.CreatedAt, p.UpdatedAt)
+	return err
+}
+
+func (d *DB) GetLLMProvider(id string) (*model.LLMProvider, error) {
+	var p model.LLMProvider
+	err := d.QueryRow(`SELECT id, name, provider_type, endpoint, api_key, model, created_at, updated_at
+		FROM llm_providers WHERE id = ?`, id).Scan(
+		&p.ID, &p.Name, &p.ProviderType, &p.Endpoint, &p.APIKey, &p.Model, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (d *DB) ListLLMProviders() ([]*model.LLMProvider, error) {
+	rows, err := d.Query(`SELECT id, name, provider_type, endpoint, api_key, model, created_at, updated_at
+		FROM llm_providers ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.LLMProvider
+	for rows.Next() {
+		var p model.LLMProvider
+		if err := rows.Scan(&p.ID, &p.Name, &p.ProviderType, &p.Endpoint, &p.APIKey, &p.Model, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, &p)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) UpdateLLMProvider(p *model.LLMProvider) error {
+	_, err := d.Exec(`UPDATE llm_providers SET name = ?, provider_type = ?, endpoint = ?,
+		api_key = ?, model = ?, updated_at = ? WHERE id = ?`,
+		p.Name, p.ProviderType, p.Endpoint, p.APIKey, p.Model, p.UpdatedAt, p.ID)
+	return err
+}
+
+func (d *DB) DeleteLLMProvider(id string) error {
+	_, err := d.Exec(`DELETE FROM llm_providers WHERE id = ?`, id)
+	return err
+}
+
 func (d *DB) CreateCustomImage(c *model.CustomImage) error {
 	_, err := d.Exec(`INSERT INTO custom_images
 		(id, name, dockerfile, desktop, desktop_cmd, status, status_msg, build_progress, created_at, updated_at)

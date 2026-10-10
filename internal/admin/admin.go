@@ -160,6 +160,131 @@ func (h *Handler) ListCustom(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"images": custom})
 }
 
+// maskAPIKey returns a masked version like "sk-...abcd".
+func maskAPIKey(key string) string {
+	if len(key) <= 8 {
+		return "••••"
+	}
+	return key[:3] + "…" + key[len(key)-4:]
+}
+
+// ListLLM handles GET /api/admin/llm-providers (keys masked).
+func (h *Handler) ListLLM(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	providers, err := h.DB.ListLLMProviders()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	for _, p := range providers {
+		p.APIKeyMasked = maskAPIKey(p.APIKey)
+		p.APIKey = ""
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": providers})
+}
+
+// CreateLLM handles POST /api/admin/llm-providers.
+func (h *Handler) CreateLLM(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	var body struct {
+		Name         string `json:"name"`
+		ProviderType string `json:"provider_type"`
+		Endpoint     string `json:"endpoint"`
+		APIKey       string `json:"api_key"`
+		Model        string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	body.Name = strings.TrimSpace(body.Name)
+	if body.Name == "" || body.APIKey == "" || body.Model == "" {
+		writeErr(w, http.StatusBadRequest, "name, api_key and model are required")
+		return
+	}
+	if body.ProviderType != "anthropic" {
+		body.ProviderType = "openai"
+	}
+	now := db.Now()
+	p := &model.LLMProvider{
+		ID:           db.NewID(),
+		Name:         body.Name,
+		ProviderType: body.ProviderType,
+		Endpoint:     strings.TrimSpace(body.Endpoint),
+		APIKey:       body.APIKey,
+		Model:        strings.TrimSpace(body.Model),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := h.DB.CreateLLMProvider(p); err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	p.APIKeyMasked = maskAPIKey(p.APIKey)
+	p.APIKey = ""
+	writeJSON(w, http.StatusCreated, map[string]any{"provider": p})
+}
+
+// UpdateLLM handles PUT /api/admin/llm-providers/{id}.
+func (h *Handler) UpdateLLM(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	p, err := h.DB.GetLLMProvider(r.PathValue("id"))
+	if err != nil || p == nil {
+		writeErr(w, http.StatusNotFound, "provider not found")
+		return
+	}
+	var body struct {
+		Name         string `json:"name"`
+		ProviderType string `json:"provider_type"`
+		Endpoint     string `json:"endpoint"`
+		APIKey       string `json:"api_key"` // empty = keep existing
+		Model        string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if strings.TrimSpace(body.Name) != "" {
+		p.Name = strings.TrimSpace(body.Name)
+	}
+	if body.ProviderType == "anthropic" || body.ProviderType == "openai" {
+		p.ProviderType = body.ProviderType
+	}
+	p.Endpoint = strings.TrimSpace(body.Endpoint)
+	if body.APIKey != "" {
+		p.APIKey = body.APIKey
+	}
+	if strings.TrimSpace(body.Model) != "" {
+		p.Model = strings.TrimSpace(body.Model)
+	}
+	p.UpdatedAt = db.Now()
+	if err := h.DB.UpdateLLMProvider(p); err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	p.APIKeyMasked = maskAPIKey(p.APIKey)
+	p.APIKey = ""
+	writeJSON(w, http.StatusOK, map[string]any{"provider": p})
+}
+
+// DeleteLLM handles DELETE /api/admin/llm-providers/{id}.
+func (h *Handler) DeleteLLM(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	if err := h.DB.DeleteLLMProvider(r.PathValue("id")); err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // CreateCustom handles POST /api/admin/custom-images {name, dockerfile}.
 func (h *Handler) CreateCustom(w http.ResponseWriter, r *http.Request) {
 	if !requireAdmin(w, r) {

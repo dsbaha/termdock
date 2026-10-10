@@ -449,4 +449,17 @@ export class TermDockTerminal {
     }
     document.title = `${prefix} ${name}`;
   }
+
+  /** Returns the last maxLines of terminal text (for LLM context). */
+  getTranscript(maxLines = 100) {
+    if (!this._term) return '';
+    const buf = this._term.buffer.active;
+    const lines = [];
+    const start = Math.max(0, buf.length - maxLines);
+    for (let i = start; i < buf.length; i++) {
+      lines.push(buf.getLine(i).translateToString(true));
+    }
+    return lines.join('\n').trim();
+  }
+
 }

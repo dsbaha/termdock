@@ -126,6 +126,148 @@ async function init() {
   else showAuth();
 }
 
+
+/* ---------------- LLM chat panel ---------------- */
+const LLM = {
+  providers: [],
+  history: {}, // sessionId -> [{role, content}]
+  screenshotB64: null, // pending screenshot for next message
+};
+
+async function loadLLMProviderOptions() {
+  const r = await api('GET', '/api/llm-providers');
+  LLM.providers = r.ok ? (r.data.providers || []) : [];
+  const sel = $('llm-provider-select');
+  sel.innerHTML = '';
+  for (const p of LLM.providers) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = `${p.name} (${p.model})`;
+    sel.appendChild(opt);
+  }
+  if (!LLM.providers.length) {
+    const opt = document.createElement('option');
+    opt.textContent = 'No LLMs configured (Admin panel)';
+    sel.appendChild(opt);
+  }
+}
+
+function toggleLLMPanel(show) {
+  const panel = $('llm-panel');
+  const willShow = show !== undefined ? show : panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !willShow);
+  if (willShow) loadLLMProviderOptions();
+}
+
+function llmAddMessage(role, content, isError) {
+  const wrap = $('llm-messages');
+  const div = document.createElement('div');
+  div.className = 'llm-msg ' + (isError ? 'error' : role);
+  div.textContent = content;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+  return div;
+}
+
+function getActiveSession() {
+  const tab = S.tabs.find((t) => t.tabEl.classList.contains('active'));
+  return tab ? tab.session : null;
+}
+
+function getTerminalTranscript() {
+  const tab = S.tabs.find((t) => t.tabEl.classList.contains('active'));
+  if (tab && tab.tterm && tab.tterm.getTranscript) {
+    return tab.tterm.getTranscript(80);
+  }
+  return '';
+}
+
+function getDesktopScreenshot() {
+  // Find the active desktop viewer canvas.
+  const tab = S.tabs.find((t) => t.tabEl.classList.contains('active'));
+  if (!tab || !tab.panelEl) return null;
+  const canvas = tab.panelEl.querySelector('.desktop-screen canvas');
+  if (!canvas) return null;
+  try {
+    const url = canvas.toDataURL('image/png');
+    // Strip the data: prefix for the API.
+    return url.split(',')[1];
+  } catch (e) {
+    return null;
+  }
+}
+
+async function llmSend() {
+  const input = $('llm-input');
+  const text = input.value.trim();
+  if (!text) return;
+  const session = getActiveSession();
+  if (!session) return toast('Open a session first.');
+  const providerId = $('llm-provider-select').value;
+  if (!providerId || !LLM.providers.length) {
+    return toast('Configure an LLM in the Admin panel first.');
+  }
+  const sessionId = session.id;
+  if (!LLM.history[sessionId]) LLM.history[sessionId] = [];
+  const history = LLM.history[sessionId];
+
+  // Show user message (with screenshot thumbnail if attached).
+  const userDiv = llmAddMessage('user', text);
+  let screenshotB64 = LLM.screenshotB64;
+  LLM.screenshotB64 = null;
+  $('llm-shot-btn').textContent = '📷';
+  if (screenshotB64) {
+    const img = document.createElement('img');
+    img.className = 'shot-thumb';
+    img.src = 'data:image/png;base64,' + screenshotB64;
+    userDiv.appendChild(img);
+  }
+  input.value = '';
+
+  // Gather terminal context (last 80 lines) for terminal sessions.
+  let terminalContext = '';
+  if (session.display !== 'desktop') {
+    terminalContext = getTerminalTranscript();
+  }
+
+  history.push({ role: 'user', content: text });
+  const typing = document.createElement('div');
+  typing.className = 'llm-typing';
+  typing.textContent = 'Thinking…';
+  $('llm-messages').appendChild(typing);
+
+  const r = await api('POST', `/api/sessions/${sessionId}/llm-chat`, {
+    provider_id: providerId,
+    messages: history.slice(-20), // last 20 turns
+    terminal_context: terminalContext,
+    screenshot_b64: screenshotB64 || '',
+  });
+  typing.remove();
+  if (!r.ok) {
+    llmAddMessage('assistant', 'Error: ' + apiError(r), true);
+    return;
+  }
+  const reply = r.data.response || '(no response)';
+  history.push({ role: 'assistant', content: reply });
+  llmAddMessage('assistant', reply);
+}
+
+function initLLMPanel() {
+  $('llm-toggle-btn').onclick = () => toggleLLMPanel();
+  $('llm-close-btn').onclick = () => toggleLLMPanel(false);
+  $('llm-send-btn').onclick = llmSend;
+  $('llm-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') llmSend();
+  });
+  $('llm-shot-btn').onclick = () => {
+    const b64 = getDesktopScreenshot();
+    if (!b64) return toast('No desktop view active to capture.');
+    LLM.screenshotB64 = b64;
+    $('llm-shot-btn').textContent = '📷✓';
+    toast('Screenshot attached — it will send with your next message.');
+  };
+}
+
 /* ---------------- Orgs ---------------- */
 
 async function loadOrgs() {
@@ -685,6 +827,7 @@ async function syncTerminalTabs() {
 function initAdmin() {
   $('admin-btn').onclick = () => showAdmin(true);
   $('admin-back-btn').onclick = () => showAdmin(false);
+  initLLMAdmin();
   $('allowed-add-form').onsubmit = async (e) => {
     e.preventDefault();
     const image = $('allowed-add-input').value.trim();
@@ -716,6 +859,7 @@ function initAdmin() {
     if (!r.ok) return toast('Save failed: ' + apiError(r));
     $('custom-editor').classList.add('hidden');
     await loadCustomImages();
+      await loadLLMProviders();
     await loadImageOptions();
   };
 }
@@ -723,7 +867,7 @@ function initAdmin() {
 function showAdmin(show) {
   document.querySelector('#app-view .layout').classList.toggle('hidden', show);
   $('admin-view').classList.toggle('hidden', !show);
-  if (show) { loadAllowedImages(); loadCustomImages(); }
+  if (show) { loadAllowedImages(); loadCustomImages(); loadLLMProviders(); }
 }
 
 async function loadAllowedImages() {
@@ -840,6 +984,78 @@ async function loadCustomImages() {
   else if (buildPollTimer) { clearInterval(buildPollTimer); buildPollTimer = null; }
 }
 
+
+// ---------- Authorized LLMs (admin) ----------
+async function loadLLMProviders() {
+  const r = await api('GET', '/api/admin/llm-providers');
+  const list = $('llm-list');
+  list.innerHTML = '';
+  for (const p of r.ok ? (r.data.providers || []) : []) {
+    const row = document.createElement('div');
+    row.className = 'admin-row';
+    const code = document.createElement('code');
+    code.className = 'grow';
+    code.textContent = `${p.name} (${p.model})`;
+    const key = document.createElement('span');
+    key.className = 'muted';
+    key.textContent = p.api_key_masked || '';
+    const edit = document.createElement('button');
+    edit.className = 'btn small ghost';
+    edit.textContent = 'Edit';
+    edit.onclick = () => {
+      $('llm-id').value = p.id;
+      $('llm-name').value = p.name;
+      $('llm-type').value = p.provider_type || 'openai';
+      $('llm-endpoint').value = p.endpoint || '';
+      $('llm-key').value = '';
+      $('llm-model').value = p.model || '';
+      $('llm-editor').classList.remove('hidden');
+    };
+    const del = document.createElement('button');
+    del.className = 'btn small danger';
+    del.textContent = 'Delete';
+    del.onclick = async () => {
+      if (!confirm(`Delete LLM provider "${p.name}"?`)) return;
+      const dr = await api('DELETE', `/api/admin/llm-providers/${p.id}`);
+      if (!dr.ok) return toast('Delete failed: ' + apiError(dr));
+      await loadLLMProviders();
+    };
+    row.appendChild(code); row.appendChild(key);
+    row.appendChild(edit); row.appendChild(del);
+    list.appendChild(row);
+  }
+}
+
+function initLLMAdmin() {
+  $('llm-new-btn').onclick = () => {
+    $('llm-id').value = '';
+    $('llm-name').value = '';
+    $('llm-type').value = 'openai';
+    $('llm-endpoint').value = '';
+    $('llm-key').value = '';
+    $('llm-model').value = '';
+    $('llm-editor').classList.remove('hidden');
+  };
+  $('llm-cancel-btn').onclick = () => $('llm-editor').classList.add('hidden');
+  $('llm-editor').onsubmit = async (e) => {
+    e.preventDefault();
+    const id = $('llm-id').value;
+    const body = {
+      name: $('llm-name').value.trim(),
+      provider_type: $('llm-type').value,
+      endpoint: $('llm-endpoint').value.trim(),
+      api_key: $('llm-key').value,
+      model: $('llm-model').value.trim(),
+    };
+    const r = id
+      ? await api('PUT', `/api/admin/llm-providers/${id}`, body)
+      : await api('POST', '/api/admin/llm-providers', body);
+    if (!r.ok) return toast('Save failed: ' + apiError(r));
+    $('llm-editor').classList.add('hidden');
+    await loadLLMProviders();
+  };
+}
+
 // Fill the new-terminal image dropdown. Admins also get a "Custom…" entry
 // revealing a free-text field.
 async function loadImageOptions() {
@@ -897,6 +1113,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initNewSessionModal();
   initShareModal();
   initAdmin();
+  initLLMPanel();
   initImageSelect();
   $('new-term-btn').onclick = () => newTerminalTab();
   window.addEventListener('resize', () => {

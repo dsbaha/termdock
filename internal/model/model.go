@@ -127,6 +127,19 @@ type AllowedImage struct {
 // CustomImage is an admin-defined Dockerfile. It is built on demand as
 // termdock/<name>:latest when a session requests it and no cached image
 // exists.
+// LLMProvider is an admin-configured LLM service TermDock can proxy chat to.
+type LLMProvider struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ProviderType string `json:"provider_type"` // "openai" or "anthropic"
+	Endpoint     string `json:"endpoint"`
+	APIKey       string `json:"api_key,omitempty"` // omitted in list responses
+	APIKeyMasked string `json:"api_key_masked,omitempty"`
+	Model        string `json:"model"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+}
+
 type CustomImage struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`

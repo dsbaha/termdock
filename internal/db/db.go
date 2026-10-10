@@ -103,6 +103,16 @@ func (d *DB) migrate() error {
 			desktop INTEGER NOT NULL DEFAULT 0,
 			created_at INTEGER NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS llm_providers (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			provider_type TEXT NOT NULL DEFAULT 'openai',
+			endpoint TEXT NOT NULL DEFAULT '',
+			api_key TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS custom_images (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL UNIQUE,

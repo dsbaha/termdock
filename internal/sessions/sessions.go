@@ -18,6 +18,7 @@ import (
 	"termdock/internal/db"
 	"termdock/internal/dockerx"
 	"termdock/internal/hub"
+	"termdock/internal/llm"
 	"termdock/internal/model"
 )
 
@@ -834,4 +835,58 @@ func (h *Handler) Reconcile(ctx context.Context) {
 		// Adopt the surviving container.
 		_ = h.DB.UpdateSessionContainer(s.ID, id, model.SessionRunning)
 	}
+}
+
+// LLMChat handles POST /api/sessions/{id}/llm-chat.
+// Proxies a chat message to the configured LLM provider with session context.
+func (h *Handler) LLMChat(w http.ResponseWriter, r *http.Request) {
+	ac, ok := h.resolve(w, r, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	var body llm.ChatRequest
+	body.SessionID = ac.session.ID
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	// Get the provider (includes the API key, server-side only).
+	provider, err := h.DB.GetLLMProvider(body.ProviderID)
+	if err != nil || provider == nil {
+		writeErr(w, http.StatusNotFound, "LLM provider not found")
+		return
+	}
+	if provider.APIKey == "" {
+		writeErr(w, http.StatusBadRequest, "LLM provider has no API key configured")
+		return
+	}
+	systemPrompt := llm.SystemPrompt(ac.session.Display, body.TerminalContext, body.ScreenshotB64 != "")
+	resp, err := llm.Chat(r.Context(), provider.ProviderType, provider.Endpoint,
+		provider.APIKey, provider.Model, systemPrompt, body.Messages, body.ScreenshotB64)
+	if err != nil {
+		log.Printf("llm chat failed: %v", err)
+		writeErr(w, http.StatusBadGateway, "LLM request failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, llm.ChatResponse{Response: resp})
+}
+
+// ListLLMProviders handles GET /api/llm-providers (names only, for the chat panel).
+func (h *Handler) ListLLMProviders(w http.ResponseWriter, r *http.Request) {
+	providers, err := h.DB.ListLLMProviders()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	// Strip API keys; the browser only needs id, name, and model.
+	type public struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Model string `json:"model"`
+	}
+	out := make([]public, 0, len(providers))
+	for _, p := range providers {
+		out = append(out, public{ID: p.ID, Name: p.Name, Model: p.Model})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
 }

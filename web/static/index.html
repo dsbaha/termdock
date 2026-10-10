@@ -57,6 +57,7 @@
     <main class="main">
       <div id="tab-bar" class="tab-bar">
         <button id="new-term-btn" class="tab-add" title="New terminal in the active container">+</button>
+        <button id="llm-toggle-btn" class="tab-add" title="Chat with AI about this session">💬</button>
       </div>
       <div id="tab-panels" class="tab-panels">
         <div id="empty-state" class="empty-state">
@@ -65,6 +66,19 @@
           New sessions take a few seconds while the container starts.</p>
         </div>
       </div>
+      <aside id="llm-panel" class="llm-panel hidden">
+        <div class="llm-head">
+          <span>💬 Ask AI</span>
+          <select id="llm-provider-select" title="LLM provider"></select>
+          <button id="llm-close-btn" class="btn small ghost">✕</button>
+        </div>
+        <div id="llm-messages" class="llm-messages"></div>
+        <div class="llm-input-row">
+          <button id="llm-shot-btn" class="btn small ghost" title="Attach desktop screenshot">📷</button>
+          <input id="llm-input" type="text" placeholder="Ask about this session…" maxlength="4000">
+          <button id="llm-send-btn" class="btn small primary">Send</button>
+        </div>
+      </aside>
     </main>
   </div>
 
@@ -102,6 +116,30 @@
           <label>Desktop start command <input id="custom-desktop-cmd" type="text" placeholder="openbox (default)" maxlength="256"></label>
           <div class="modal-actions">
             <button type="button" id="custom-cancel-btn" class="btn ghost">Cancel</button>
+            <button type="submit" class="btn primary">Save</button>
+          </div>
+        </form>
+      </section>
+      <section>
+        <h3>Authorized LLMs</h3>
+        <p class="muted">LLM services users can chat with about their sessions.
+          API keys stay on the server — the browser never sees them.</p>
+        <div id="llm-list" class="admin-list"></div>
+        <button id="llm-new-btn" class="btn small">+ New LLM</button>
+        <form id="llm-editor" class="hidden">
+          <input type="hidden" id="llm-id">
+          <label>Name <input id="llm-name" type="text" placeholder="Claude" maxlength="64"></label>
+          <label>Type
+            <select id="llm-type">
+              <option value="openai">OpenAI-compatible</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+          </label>
+          <label>Endpoint <input id="llm-endpoint" type="text" placeholder="default: api.openai.com / api.anthropic.com" maxlength="256"></label>
+          <label>API key <input id="llm-key" type="password" placeholder="leave blank to keep existing" maxlength="512"></label>
+          <label>Model <input id="llm-model" type="text" placeholder="gpt-4o / claude-sonnet-4-5" maxlength="128"></label>
+          <div class="modal-actions">
+            <button type="button" id="llm-cancel-btn" class="btn ghost">Cancel</button>
             <button type="submit" class="btn primary">Save</button>
           </div>
         </form>
