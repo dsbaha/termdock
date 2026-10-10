@@ -432,7 +432,7 @@ func (d *DB) ImageProvidesDesktop(image string) (bool, error) {
 }
 
 func (d *DB) ListCustomImages() ([]model.CustomImage, error) {
-	rows, err := d.Query(`SELECT id, name, dockerfile, desktop, status, status_msg, created_at, updated_at
+	rows, err := d.Query(`SELECT id, name, dockerfile, desktop, desktop_cmd, status, status_msg, created_at, updated_at
 		FROM custom_images ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -441,7 +441,7 @@ func (d *DB) ListCustomImages() ([]model.CustomImage, error) {
 	var out []model.CustomImage
 	for rows.Next() {
 		var c model.CustomImage
-		if err := rows.Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Desktop, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Desktop, &c.DesktopCmd, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -459,9 +459,9 @@ func (d *DB) GetCustomImageByName(name string) (*model.CustomImage, error) {
 
 func (d *DB) getCustomImage(where, arg string) (*model.CustomImage, error) {
 	var c model.CustomImage
-	err := d.QueryRow(`SELECT id, name, dockerfile, desktop, status, status_msg, created_at, updated_at
+	err := d.QueryRow(`SELECT id, name, dockerfile, desktop, desktop_cmd, status, status_msg, created_at, updated_at
 		FROM custom_images WHERE `+where,
-		arg).Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Desktop, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt)
+		arg).Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Desktop, &c.DesktopCmd, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -473,9 +473,9 @@ func (d *DB) getCustomImage(where, arg string) (*model.CustomImage, error) {
 
 func (d *DB) CreateCustomImage(c *model.CustomImage) error {
 	_, err := d.Exec(`INSERT INTO custom_images
-		(id, name, dockerfile, desktop, status, status_msg, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.Name, c.Dockerfile, c.Desktop, c.Status, c.StatusMsg, c.CreatedAt, c.UpdatedAt)
+		(id, name, dockerfile, desktop, desktop_cmd, status, status_msg, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.Name, c.Dockerfile, c.Desktop, c.DesktopCmd, c.Status, c.StatusMsg, c.CreatedAt, c.UpdatedAt)
 	return err
 }
 
@@ -508,9 +508,43 @@ func (d *DB) EnsureDesktopCustomImage(now int64) error {
 	})
 }
 
+// KDEDesktopDockerfile is the seeded "kde" custom image: full KDE Plasma
+// desktop with Konqueror, for desktop sessions that want a complete DE.
+const KDEDesktopDockerfile = `FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    xvfb x11vnc dbus-x11 \\
+    kde-plasma-desktop konqueror \\
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+`
+
+// KDEDesktopCmd starts a KDE Plasma X11 session (needs a D-Bus session bus).
+const KDEDesktopCmd = "dbus-run-session -- startplasma-x11"
+
+// EnsureKDECustomImage seeds the "kde" custom image when missing.
+func (d *DB) EnsureKDECustomImage(now int64) error {
+	existing, err := d.GetCustomImageByName("kde")
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return nil
+	}
+	return d.CreateCustomImage(&model.CustomImage{
+		ID:         NewID(),
+		Name:       "kde",
+		Dockerfile: KDEDesktopDockerfile,
+		Desktop:    true,
+		DesktopCmd: KDEDesktopCmd,
+		Status:     model.CustomImageIdle,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+}
+
 func (d *DB) UpdateCustomImage(c *model.CustomImage) error {
-	_, err := d.Exec(`UPDATE custom_images SET name = ?, dockerfile = ?, desktop = ?, updated_at = ? WHERE id = ?`,
-		c.Name, c.Dockerfile, c.Desktop, c.UpdatedAt, c.ID)
+	_, err := d.Exec(`UPDATE custom_images SET name = ?, dockerfile = ?, desktop = ?, desktop_cmd = ?, updated_at = ? WHERE id = ?`,
+		c.Name, c.Dockerfile, c.Desktop, c.DesktopCmd, c.UpdatedAt, c.ID)
 	return err
 }
 

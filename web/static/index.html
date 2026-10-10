@@ -99,6 +99,7 @@
             <textarea id="custom-dockerfile" rows="14" spellcheck="false" placeholder="FROM ubuntu:24.04&#10;RUN apt-get update && apt-get install -y ..."></textarea>
           </label>
           <label class="check"><input id="custom-desktop" type="checkbox"> Provides desktop (X11: xvfb + window manager + x11vnc)</label>
+          <label>Desktop start command <input id="custom-desktop-cmd" type="text" placeholder="openbox (default)" maxlength="256"></label>
           <div class="modal-actions">
             <button type="button" id="custom-cancel-btn" class="btn ghost">Cancel</button>
             <button type="submit" class="btn primary">Save</button>

@@ -329,7 +329,7 @@ func (h *Handler) provision(sessionID string) {
 	if sess.Display == model.DisplayDesktop {
 		log.Printf("provision %s: starting X stack", sessionID)
 		set(model.SessionCreating, "starting desktop")
-		if err := h.startXStack(ctx, containerID); err != nil {
+		if err := h.startXStack(ctx, containerID, sess.Image); err != nil {
 			fail("desktop start failed: " + err.Error())
 			return
 		}
@@ -344,6 +344,20 @@ func (h *Handler) provision(sessionID string) {
 	_ = h.DB.TouchSession(sessionID, db.Now())
 }
 
+// desktopCmdForImage returns the custom startup command for a custom image,
+// or "" for the default (openbox).
+func (h *Handler) desktopCmdForImage(image string) string {
+	name, isCustom := model.ParseCustomImageName(image)
+	if !isCustom {
+		return ""
+	}
+	c, err := h.DB.GetCustomImageByName(name)
+	if err != nil || c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.DesktopCmd)
+}
+
 // X display layout for desktop sessions.
 const (
 	xDisplay    = ":99"
@@ -356,17 +370,24 @@ const (
 // session's container, then waits for the VNC port to accept connections.
 // The image must provide the X stack binaries (see the seeded "desktop"
 // custom image); otherwise this returns a descriptive error.
-func (h *Handler) startXStack(ctx context.Context, containerID string) error {
+func (h *Handler) startXStack(ctx context.Context, containerID, image string) error {
 	// Xvfb first: everything else needs the display socket.
 	if err := h.Docker.ExecDetached(ctx, containerID, nil,
 		"Xvfb", xDisplay, "-screen", "0", xScreen); err != nil {
 		return fmt.Errorf("Xvfb: %w (image needs the xvfb package)", err)
 	}
+	// Window manager / desktop environment. Custom images may define their
+	// own startup command (e.g. KDE); otherwise openbox.
+	wmCmd := []string{"openbox"}
+	desktopCmd := h.desktopCmdForImage(image)
+	if desktopCmd != "" {
+		wmCmd = strings.Fields(desktopCmd)
+	}
 	// Give Xvfb a moment to create the socket, then start the WM and VNC.
 	time.Sleep(2 * time.Second)
 	if err := h.Docker.ExecDetached(ctx, containerID,
-		[]string{"DISPLAY=" + xDisplay}, "openbox"); err != nil {
-		return fmt.Errorf("openbox: %w (image needs the openbox package)", err)
+		[]string{"DISPLAY=" + xDisplay}, wmCmd...); err != nil {
+		return fmt.Errorf("%s: %w (image needs the desktop packages)", strings.Join(wmCmd, " "), err)
 	}
 	if err := h.Docker.ExecDetached(ctx, containerID, nil,
 		"x11vnc", "-display", xDisplay, "-forever", "-shared", "-nopw",

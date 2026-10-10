@@ -700,6 +700,7 @@ function initAdmin() {
     $('custom-id').value = '';
     $('custom-name').value = '';
     $('custom-desktop').checked = false;
+    $('custom-desktop-cmd').value = '';
     $('custom-name').disabled = false;
     $('custom-dockerfile').value = 'FROM ubuntu:24.04\n';
     $('custom-editor').classList.remove('hidden');
@@ -708,7 +709,7 @@ function initAdmin() {
   $('custom-editor').onsubmit = async (e) => {
     e.preventDefault();
     const id = $('custom-id').value;
-    const body = { name: $('custom-name').value.trim(), dockerfile: $('custom-dockerfile').value, desktop: $('custom-desktop').checked };
+    const body = { name: $('custom-name').value.trim(), dockerfile: $('custom-dockerfile').value, desktop: $('custom-desktop').checked, desktop_cmd: $('custom-desktop-cmd').value.trim() };
     const r = id
       ? await api('PUT', `/api/admin/custom-images/${id}`, body)
       : await api('POST', '/api/admin/custom-images', body);
@@ -776,6 +777,7 @@ async function loadCustomImages() {
       $('custom-name').disabled = false;
       $('custom-dockerfile').value = c.dockerfile;
       $('custom-desktop').checked = !!c.desktop;
+      $('custom-desktop-cmd').value = c.desktop_cmd || '';
       $('custom-editor').classList.remove('hidden');
     };
     const build = document.createElement('button');

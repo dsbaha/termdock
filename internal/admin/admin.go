@@ -169,6 +169,7 @@ func (h *Handler) CreateCustom(w http.ResponseWriter, r *http.Request) {
 		Name       string `json:"name"`
 		Dockerfile string `json:"dockerfile"`
 		Desktop    bool   `json:"desktop"`
+		DesktopCmd string `json:"desktop_cmd"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
@@ -189,6 +190,7 @@ func (h *Handler) CreateCustom(w http.ResponseWriter, r *http.Request) {
 		Name:       body.Name,
 		Dockerfile: body.Dockerfile,
 		Desktop:    body.Desktop,
+		DesktopCmd: strings.TrimSpace(body.DesktopCmd),
 		Status:     model.CustomImageIdle,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -218,6 +220,7 @@ func (h *Handler) UpdateCustom(w http.ResponseWriter, r *http.Request) {
 		Name       string `json:"name"`
 		Dockerfile string `json:"dockerfile"`
 		Desktop    bool   `json:"desktop"`
+		DesktopCmd string `json:"desktop_cmd"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON")
@@ -235,6 +238,7 @@ func (h *Handler) UpdateCustom(w http.ResponseWriter, r *http.Request) {
 	c.Name = body.Name
 	c.Dockerfile = body.Dockerfile
 	c.Desktop = body.Desktop
+	c.DesktopCmd = strings.TrimSpace(body.DesktopCmd)
 	c.UpdatedAt = db.Now()
 	if err := h.DB.UpdateCustomImage(c); err != nil {
 		writeErr(w, http.StatusInternalServerError, "database error: "+err.Error())

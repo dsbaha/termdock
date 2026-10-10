@@ -131,7 +131,8 @@ type CustomImage struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	Dockerfile string `json:"dockerfile"`
-	Desktop    bool   `json:"desktop"` // provides an X stack for desktop sessions
+	Desktop    bool   `json:"desktop"`    // provides an X stack for desktop sessions
+	DesktopCmd string `json:"desktop_cmd"` // WM/DE startup command (default: openbox)
 	Status     string `json:"status"`
 	StatusMsg  string `json:"status_msg"`
 	CreatedAt  int64  `json:"created_at"`

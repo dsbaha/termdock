@@ -88,6 +88,10 @@ func main() {
 	if err := database.EnsureDesktopCustomImage(db.Now()); err != nil {
 		log.Printf("seed desktop image: %v", err)
 	}
+	// Seed the KDE custom image (full Plasma desktop + Konqueror).
+	if err := database.EnsureKDECustomImage(db.Now()); err != nil {
+		log.Printf("seed kde image: %v", err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
