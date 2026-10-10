@@ -753,6 +753,17 @@ async function loadAllowedImages() {
   if (!list.children.length) list.innerHTML = '<p class="muted">No images allowed yet.</p>';
 }
 
+let buildPollTimer = null;
+function scheduleBuildPoll() {
+  if (buildPollTimer) return;
+  buildPollTimer = setInterval(() => {
+    if ($('admin-view').classList.contains('hidden')) {
+      clearInterval(buildPollTimer); buildPollTimer = null; return;
+    }
+    loadCustomImages(); // re-renders; stops itself when nothing is building
+  }, 2000);
+}
+
 async function loadCustomImages() {
   const r = await api('GET', '/api/admin/custom-images');
   if (!r.ok) return;
@@ -801,6 +812,20 @@ async function loadCustomImages() {
     };
     row.appendChild(code); row.appendChild(tag);
     row.appendChild(edit); row.appendChild(build); row.appendChild(del);
+    // Build progress bar: green while building, red on error. Shows the
+    // build name and percentage.
+    if (c.status === 'building' || (c.status === 'error' && c.build_progress > 0)) {
+      const bar = document.createElement('div');
+      bar.className = 'build-bar' + (c.status === 'error' ? ' error' : '');
+      const fill = document.createElement('div');
+      fill.className = 'build-fill';
+      fill.style.width = Math.min(100, Math.max(0, c.build_progress || 0)) + '%';
+      const label = document.createElement('span');
+      label.className = 'build-label';
+      label.textContent = `termdock/${c.name}:latest · ${c.build_progress || 0}%`;
+      bar.appendChild(fill); bar.appendChild(label);
+      row.appendChild(bar);
+    }
     if (c.status_msg) {
       const msg = document.createElement('div');
       msg.className = 'err-msg';
@@ -810,6 +835,9 @@ async function loadCustomImages() {
     list.appendChild(row);
   }
   if (!list.children.length) list.innerHTML = '<p class="muted">No custom images yet.</p>';
+  const anyBuilding = (r.data.images || []).some((c) => c.status === 'building');
+  if (anyBuilding) scheduleBuildPoll();
+  else if (buildPollTimer) { clearInterval(buildPollTimer); buildPollTimer = null; }
 }
 
 // Fill the new-terminal image dropdown. Admins also get a "Custom…" entry

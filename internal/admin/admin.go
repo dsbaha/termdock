@@ -303,8 +303,16 @@ func (h *Handler) runBuild(c *model.CustomImage) {
 	}()
 	tag := model.CustomImageTag(c.Name)
 	_ = h.DB.UpdateCustomImageStatus(c.ID, model.CustomImageBuilding, "", time.Now().Unix())
+	_ = h.DB.UpdateBuildProgress(c.ID, 0, time.Now().Unix())
 	// Builds can take a long time; don't inherit the HTTP request's context.
-	err := h.Docker.BuildImage(context.Background(), tag, c.Dockerfile)
+	err := h.Docker.BuildImage(context.Background(), tag, c.Dockerfile,
+		func(step, total int, text string) {
+			pct := 0
+			if total > 0 {
+				pct = step * 100 / total
+			}
+			_ = h.DB.UpdateBuildProgress(c.ID, pct, time.Now().Unix())
+		})
 	now := time.Now().Unix()
 	if err != nil {
 		log.Printf("admin: build of custom image %q failed: %v", tag, err)

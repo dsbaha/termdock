@@ -16,6 +16,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -149,7 +151,12 @@ func (c *Client) ImageExists(ctx context.Context, ref string) bool {
 // BuildImage builds tag from an in-memory Dockerfile (a tar stream holding
 // just the Dockerfile is sent as the build context). The build output stream
 // is drained; on failure the tail of the output is included in the error.
-func (c *Client) BuildImage(ctx context.Context, tag, dockerfile string) error {
+// BuildProgress reports build progress: step/total from the "Step X/Y" stream,
+// plus the current step's text.
+type BuildProgress func(step, total int, text string)
+
+// BuildImage builds tag from the Dockerfile string. onProgress may be nil.
+func (c *Client) BuildImage(ctx context.Context, tag, dockerfile string, onProgress BuildProgress) error {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	data := []byte(dockerfile)
@@ -173,9 +180,30 @@ func (c *Client) BuildImage(ctx context.Context, tag, dockerfile string) error {
 	}
 	defer resp.Body.Close()
 	// Drain the JSON progress stream; keep the tail for diagnostics.
+	// Parse "Step X/Y" lines for progress reporting.
 	const tailMax = 8 * 1024
 	tail := make([]byte, 0, tailMax)
 	tmp := make([]byte, 32*1024)
+	var pending []byte
+	stepRe := regexp.MustCompile(`Step (\d+)/(\d+)\s*:\s*(.*)`)
+	report := func(line []byte) {
+		if onProgress == nil {
+			return
+		}
+		var obj struct {
+			Stream string `json:"stream"`
+		}
+		if json.Unmarshal(line, &obj) != nil || obj.Stream == "" {
+			return
+		}
+		m := stepRe.FindStringSubmatch(obj.Stream)
+		if m == nil {
+			return
+		}
+		step, _ := strconv.Atoi(m[1])
+		total, _ := strconv.Atoi(m[2])
+		onProgress(step, total, strings.TrimSpace(m[3]))
+	}
 	for {
 		n, err := resp.Body.Read(tmp)
 		if n > 0 {
@@ -183,10 +211,22 @@ func (c *Client) BuildImage(ctx context.Context, tag, dockerfile string) error {
 			if len(tail) > tailMax {
 				tail = tail[len(tail)-tailMax:]
 			}
+			pending = append(pending, tmp[:n]...)
+			for {
+				i := bytes.IndexByte(pending, '\n')
+				if i < 0 {
+					break
+				}
+				report(pending[:i])
+				pending = pending[i+1:]
+			}
 		}
 		if err != nil {
 			break
 		}
+	}
+	if len(pending) > 0 {
+		report(pending)
 	}
 	// A failed build usually surfaces as an "error" / "errorDetail" object
 	// in the stream rather than an HTTP error; detect it in the tail.

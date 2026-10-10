@@ -284,7 +284,7 @@ func (h *Handler) provision(sessionID string) {
 			log.Printf("provision %s: building custom image %s", sessionID, sess.Image)
 			set(model.SessionBuilding, "building image "+sess.Image)
 			_ = h.DB.UpdateCustomImageStatus(custom.ID, model.CustomImageBuilding, "", db.Now())
-			if err := h.Docker.BuildImage(ctx, sess.Image, custom.Dockerfile); err != nil {
+			if err := h.Docker.BuildImage(ctx, sess.Image, custom.Dockerfile, nil); err != nil {
 				_ = h.DB.UpdateCustomImageStatus(custom.ID, model.CustomImageError, err.Error(), db.Now())
 				fail("image build failed: " + err.Error())
 				return

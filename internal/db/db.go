@@ -109,6 +109,7 @@ func (d *DB) migrate() error {
 			dockerfile TEXT NOT NULL,
 			desktop INTEGER NOT NULL DEFAULT 0,
 			desktop_cmd TEXT NOT NULL DEFAULT '',
+			build_progress INTEGER NOT NULL DEFAULT 0,
 			status TEXT NOT NULL DEFAULT 'idle',
 			status_msg TEXT NOT NULL DEFAULT '',
 			created_at INTEGER NOT NULL,
@@ -130,6 +131,7 @@ func (d *DB) migrate() error {
 		`ALTER TABLE allowed_images ADD COLUMN desktop INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE custom_images ADD COLUMN desktop INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE custom_images ADD COLUMN desktop_cmd TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE custom_images ADD COLUMN build_progress INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := d.Exec(alter); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

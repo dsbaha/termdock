@@ -432,7 +432,7 @@ func (d *DB) ImageProvidesDesktop(image string) (bool, error) {
 }
 
 func (d *DB) ListCustomImages() ([]model.CustomImage, error) {
-	rows, err := d.Query(`SELECT id, name, dockerfile, desktop, desktop_cmd, status, status_msg, created_at, updated_at
+	rows, err := d.Query(`SELECT id, name, dockerfile, desktop, desktop_cmd, status, status_msg, build_progress, created_at, updated_at
 		FROM custom_images ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -441,7 +441,7 @@ func (d *DB) ListCustomImages() ([]model.CustomImage, error) {
 	var out []model.CustomImage
 	for rows.Next() {
 		var c model.CustomImage
-		if err := rows.Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Desktop, &c.DesktopCmd, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Desktop, &c.DesktopCmd, &c.Status, &c.StatusMsg, &c.BuildProgress, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -459,9 +459,9 @@ func (d *DB) GetCustomImageByName(name string) (*model.CustomImage, error) {
 
 func (d *DB) getCustomImage(where, arg string) (*model.CustomImage, error) {
 	var c model.CustomImage
-	err := d.QueryRow(`SELECT id, name, dockerfile, desktop, desktop_cmd, status, status_msg, created_at, updated_at
+	err := d.QueryRow(`SELECT id, name, dockerfile, desktop, desktop_cmd, status, status_msg, build_progress, created_at, updated_at
 		FROM custom_images WHERE `+where,
-		arg).Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Desktop, &c.DesktopCmd, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt)
+		arg).Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Desktop, &c.DesktopCmd, &c.Status, &c.StatusMsg, &c.BuildProgress, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -473,9 +473,9 @@ func (d *DB) getCustomImage(where, arg string) (*model.CustomImage, error) {
 
 func (d *DB) CreateCustomImage(c *model.CustomImage) error {
 	_, err := d.Exec(`INSERT INTO custom_images
-		(id, name, dockerfile, desktop, desktop_cmd, status, status_msg, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.Name, c.Dockerfile, c.Desktop, c.DesktopCmd, c.Status, c.StatusMsg, c.CreatedAt, c.UpdatedAt)
+		(id, name, dockerfile, desktop, desktop_cmd, status, status_msg, build_progress, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.Name, c.Dockerfile, c.Desktop, c.DesktopCmd, c.Status, c.StatusMsg, c.BuildProgress, c.CreatedAt, c.UpdatedAt)
 	return err
 }
 
@@ -551,6 +551,19 @@ func (d *DB) UpdateCustomImage(c *model.CustomImage) error {
 func (d *DB) UpdateCustomImageStatus(id, status, msg string, now int64) error {
 	_, err := d.Exec(`UPDATE custom_images SET status = ?, status_msg = ?, updated_at = ? WHERE id = ?`,
 		status, msg, now, id)
+	return err
+}
+
+// UpdateBuildProgress sets the 0-100 build progress for a custom image.
+func (d *DB) UpdateBuildProgress(id string, progress int, now int64) error {
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 100 {
+		progress = 100
+	}
+	_, err := d.Exec(`UPDATE custom_images SET build_progress = ?, updated_at = ? WHERE id = ?`,
+		progress, now, id)
 	return err
 }
 

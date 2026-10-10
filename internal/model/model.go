@@ -133,8 +133,9 @@ type CustomImage struct {
 	Dockerfile string `json:"dockerfile"`
 	Desktop    bool   `json:"desktop"`    // provides an X stack for desktop sessions
 	DesktopCmd string `json:"desktop_cmd"` // WM/DE startup command (default: openbox)
-	Status     string `json:"status"`
-	StatusMsg  string `json:"status_msg"`
-	CreatedAt  int64  `json:"created_at"`
-	UpdatedAt  int64  `json:"updated_at"`
+	Status        string `json:"status"`
+	StatusMsg     string `json:"status_msg"`
+	BuildProgress int    `json:"build_progress"` // 0-100 while building
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
 }

@@ -20,14 +20,14 @@ func TestBuildImageAgainstPodman(t *testing.T) {
 	}
 	tag := "termdock/buildtest:latest"
 	dockerfile := "FROM docker.io/library/alpine:3.20\nRUN echo hello > /hello.txt\n"
-	if err := c.BuildImage(ctx, tag, dockerfile); err != nil {
+	if err := c.BuildImage(ctx, tag, dockerfile, nil); err != nil {
 		t.Fatalf("BuildImage: %v", err)
 	}
 	if !c.ImageExists(ctx, tag) {
 		t.Fatalf("image %s not found after build", tag)
 	}
 	// Cached path: building again must succeed without error.
-	if err := c.BuildImage(ctx, tag, dockerfile); err != nil {
+	if err := c.BuildImage(ctx, tag, dockerfile, nil); err != nil {
 		t.Fatalf("rebuild: %v", err)
 	}
 	t.Logf("built and verified %s", tag)
