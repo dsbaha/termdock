@@ -1,0 +1,28 @@
+# TermDock — run with: docker compose up --build -d
+# Then open http://<host>:8080 and register the first user (becomes admin).
+services:
+  termdock:
+    build: .
+    image: termdock:latest
+    ports:
+      - "8080:8080"
+    environment:
+      TERMDOCK_ADDR: ":8080"
+      TERMDOCK_DATA: /data
+      # TERMDOCK_REG_OPEN: "true"            # set "false" to disable self-registration
+      # TERMDOCK_DEFAULT_IMAGE: ubuntu:24.04
+      # TERMDOCK_IDLE_DEFAULT: "60"
+      # Set "true" when serving behind TLS so the session cookie gets the Secure flag:
+      # TERMDOCK_SECURE_COOKIE: "true"
+    volumes:
+      - termdock-data:/data
+      # The app drives containers through the host's Docker daemon:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Optional: registry credentials for private registries (e.g. zot).
+      # The daemon itself uses the host's docker config for pulls; this mount
+      # lets the app also supply per-registry auth on ImagePull.
+      # - ~/.docker/config.json:/root/.docker/config.json:ro
+    restart: unless-stopped
+
+volumes:
+  termdock-data:

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TermDock</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/vendor/xterm.min.css">
+<script src="/vendor/xterm.min.js"></script>
+<script src="/vendor/xterm-addon-fit.min.js"></script>
+<script src="/vendor/xterm-addon-webgl.min.js"></script>
+</head>
+<body>
+
+<!-- ============ AUTH VIEW ============ -->
+<div id="auth-view" class="auth-view hidden">
+  <div class="auth-card">
+    <h1>TermDock</h1>
+    <p class="tagline">Browser terminals backed by Docker containers.</p>
+    <div class="auth-tabs">
+      <button id="tab-login" class="auth-tab active">Log in</button>
+      <button id="tab-register" class="auth-tab">Register</button>
+    </div>
+    <form id="login-form" class="auth-form">
+      <input id="login-username" type="text" placeholder="Username" autocomplete="username" required>
+      <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" required>
+      <button type="submit">Log in</button>
+    </form>
+    <form id="register-form" class="auth-form hidden">
+      <input id="register-username" type="text" placeholder="Username" autocomplete="username" required>
+      <input id="register-password" type="password" placeholder="Password (min 8 chars)" autocomplete="new-password" required>
+      <button type="submit">Create account</button>
+    </form>
+    <p id="auth-error" class="error hidden"></p>
+  </div>
+</div>
+
+<!-- ============ APP VIEW ============ -->
+<div id="app-view" class="hidden">
+  <header class="topbar">
+    <div class="brand">TermDock</div>
+    <select id="org-switcher" title="Organization"></select>
+    <button id="new-org-btn" class="btn ghost" title="Create organization">+ Org</button>
+    <div class="spacer"></div>
+    <span id="user-label" class="user-label"></span>
+    <button id="logout-btn" class="btn ghost">Log out</button>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <button id="new-session-btn" class="btn primary full">+ New terminal</button>
+      <div id="session-list" class="session-list"></div>
+    </aside>
+
+    <main class="main">
+      <div id="tab-bar" class="tab-bar"></div>
+      <div id="tab-panels" class="tab-panels">
+        <div id="empty-state" class="empty-state">
+          <h2>No terminal open</h2>
+          <p>Pick a session on the left, or create a new one.<br>
+          New sessions take a few seconds while the container starts.</p>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ============ NEW SESSION MODAL ============ -->
+<div id="new-session-modal" class="modal hidden">
+  <div class="modal-card">
+    <h2>New terminal</h2>
+    <form id="new-session-form">
+      <label>Name <input id="ns-name" type="text" placeholder="terminal" maxlength="64"></label>
+      <label>Organization <select id="ns-org"></select></label>
+      <label>Image <input id="ns-image" type="text" placeholder="ubuntu:24.04" maxlength="256"></label>
+      <label>Shell <input id="ns-shell" type="text" placeholder="/bin/bash" maxlength="128"></label>
+      <div class="row">
+        <label>CPUs <input id="ns-cpu" type="number" step="0.5" min="0.1" max="32" value="2"></label>
+        <label>Memory (MB) <input id="ns-memory" type="number" min="128" max="131072" step="128" value="2048"></label>
+        <label>Idle timeout (min, 0=never) <input id="ns-idle" type="number" min="0" max="10080" value="60"></label>
+      </div>
+      <p class="hint">The container gets a persistent <code>/workspace</code> volume and joins the <code>termdock</code> network. No ports are published.</p>
+      <div class="modal-actions">
+        <button type="button" id="ns-cancel" class="btn ghost">Cancel</button>
+        <button type="submit" class="btn primary">Create</button>
+      </div>
+    </form>
+    <p id="ns-error" class="error hidden"></p>
+  </div>
+</div>
+
+<!-- ============ SHARE MODAL ============ -->
+<div id="share-modal" class="modal hidden">
+  <div class="modal-card">
+    <h2>Share terminal</h2>
+    <p id="share-session-name" class="muted"></p>
+    <form id="share-form" class="row">
+      <input id="share-username" type="text" placeholder="Username" required>
+      <select id="share-role">
+        <option value="viewer">Viewer (read-only)</option>
+        <option value="collaborator">Collaborator (interactive)</option>
+      </select>
+      <button type="submit" class="btn primary">Share</button>
+    </form>
+    <p id="share-error" class="error hidden"></p>
+    <div id="share-list" class="share-list"></div>
+    <div class="modal-actions">
+      <button type="button" id="share-close" class="btn ghost">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

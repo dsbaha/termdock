@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TermDock</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/vendor/xterm.min.css">
+<script src="/vendor/xterm.min.js"></script>
+<script src="/vendor/xterm-addon-fit.min.js"></script>
+<script src="/vendor/xterm-addon-webgl.min.js"></script>
+<style>
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  #bar { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px;
+    background: #161b22; border-bottom: 1px solid #2d333b; color: #e6edf3; font-size: 13px; }
+  #name { color: #8b949e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #term { height: calc(100% - 34px); }
+  #term .xterm { height: 100%; padding: 4px; }
+  .td-badge { font-size: 12px; padding: 3px 10px; border-radius: 12px;
+    border: 1px solid #2d333b; background: #1c2330; color: #8b949e; white-space: nowrap; }
+  .td-badge.td-running { color: #3fb950; border-color: #3fb950; animation: tdpulse 1.2s infinite; }
+  .td-badge.td-exit-bad { color: #f85149; border-color: #f85149; }
+  .td-badge.td-exit-ok { color: #3fb950; border-color: #3fb950; }
+  @keyframes tdpulse { 50% { opacity: 0.45; } }
+  #fatal { display: none; color: #e6edf3; padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<div id="bar"><span id="badge"></span><span id="name"></span></div>
+<div id="term"></div>
+<div id="fatal"></div>
+<script type="module">
+import { TermDockTerminal } from '/terminal.js';
+
+const sessionId = location.pathname.split('/').filter(Boolean).pop();
+
+async function api(method, path, body) {
+  const opts = { method, credentials: 'same-origin', headers: {} };
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  let res;
+  try { res = await fetch(path, opts); }
+  catch (e) { return { ok: false, status: 0, data: { error: 'network error' } }; }
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* empty */ }
+  return { ok: res.ok, status: res.status, data };
+}
+
+function fatal(msg) {
+  document.getElementById('bar').style.display = 'none';
+  document.getElementById('term').style.display = 'none';
+  const el = document.getElementById('fatal');
+  el.style.display = 'block';
+  el.textContent = msg;
+}
+
+let name = 'terminal';
+const r = await api('GET', `/api/sessions/${sessionId}`);
+if (r.status === 401) {
+  fatal('Not signed in. Log in via the TermDock dashboard, then reopen this window.');
+} else if (!r.ok) {
+  fatal('Could not load terminal: ' + ((r.data && r.data.error) || 'unknown error'));
+} else {
+  name = r.data.name || name;
+  document.getElementById('name').textContent = name;
+  const t = new TermDockTerminal({
+    sessionId,
+    api,
+    updateTitle: true,
+    titleName: name,
+    notify: (msg) => console.log('[termdock]', msg),
+  });
+  await t.open(document.getElementById('term'), document.getElementById('badge'));
+  window.addEventListener('resize', () => t.refit());
+  window.addEventListener('beforeunload', () => t.close()); // detach only; the session keeps running
+}
+</script>
+</body>
+</html>

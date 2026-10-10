@@ -1,0 +1,9 @@
+# built binary (use the GitHub release instead)
+termdock
+dist/
+
+# local data dir
+data/
+
+# Go build cache (lives in ~/workspace/.gocache on this VM)
+# .gocache/
