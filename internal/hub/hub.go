@@ -51,10 +51,10 @@ type OpenFunc func(ctx context.Context, containerID, shell string, cols, rows ui
 const (
 	// MainTermID is the persistent terminal every session starts with. Extra
 	// terminals get client-generated IDs.
-	MainTermID       = "main"
-	maxExecRetries   = 5
-	readBufSize      = 32 * 1024
-	ringBufSize      = 64 * 1024 // scrollback replayed to a client that (re)attaches
+	MainTermID     = "main"
+	maxExecRetries = 5
+	readBufSize    = 32 * 1024
+	ringBufSize    = 64 * 1024 // scrollback replayed to a client that (re)attaches
 )
 
 // Hub tracks the live exec hubs of every session with attached browsers.
