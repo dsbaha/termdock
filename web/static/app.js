@@ -227,11 +227,12 @@ function syncTabs() {
 // Open (or focus) a terminal tab. termId defaults to the session's persistent
 // "main" terminal; extra terminals get client-generated IDs, each backed by
 // its own shell (docker exec) in the same container.
-function openTab(sessionId, termId) {
+function openTab(sessionId, termId, opts) {
   termId = termId || 'main';
+  opts = opts || {};
   const key = tabKey(sessionId, termId);
   if (S.tabs.has(key)) {
-    activateTab(key);
+    if (opts.activate !== false) activateTab(key);
     return;
   }
   const s = S.sessions.find((x) => x.id === sessionId);
@@ -289,7 +290,7 @@ function openTab(sessionId, termId) {
   };
   panelEl.querySelector('.delete-btn').onclick = () => deleteSession(tab);
 
-  activateTab(key);
+  if (opts.activate !== false) activateTab(key);
   try {
     attachTab(tab);
   } catch (e) {
@@ -559,9 +560,32 @@ function initShareModal() {
 /* ---------------- Polling ---------------- */
 
 let pollTimer = null;
+let termPollTimer = null;
 function startPolling() {
   if (pollTimer) return;
   pollTimer = setInterval(loadSessions, 5000);
+  // Pick up terminals opened in popups: for every session with open tabs,
+  // open (without stealing focus) any live terminal not already tabbed.
+  termPollTimer = setInterval(syncTerminalTabs, 5000);
+}
+
+async function syncTerminalTabs() {
+  const sessionIds = new Set([...S.tabs.values()].map((t) => t.sessionId));
+  for (const sessionId of sessionIds) {
+    let r;
+    try {
+      r = await api('GET', `/api/sessions/${sessionId}/terms`);
+    } catch (e) { continue; }
+    if (!r.ok) continue;
+    const s = S.sessions.find((x) => x.id === sessionId);
+    const isViewer = s && s.my_role === 'viewer';
+    for (const term of r.data.terms || []) {
+      if (term.id !== 'main' && isViewer) continue; // viewers only get main
+      if (!S.tabs.has(tabKey(sessionId, term.id))) {
+        openTab(sessionId, term.id, { activate: false });
+      }
+    }
+  }
 }
 
 /* ---------------- Admin: image management ---------------- */
