@@ -44,6 +44,7 @@
     <button id="new-org-btn" class="btn ghost" title="Create organization">+ Org</button>
     <div class="spacer"></div>
     <span id="user-label" class="user-label"></span>
+    <button id="admin-btn" class="btn ghost hidden">Admin</button>
     <button id="logout-btn" class="btn ghost">Log out</button>
   </header>
 
@@ -66,6 +67,44 @@
       </div>
     </main>
   </div>
+
+  <div id="admin-view" class="admin-view hidden">
+    <div class="admin-panel">
+      <div class="admin-head">
+        <h2>Image administration</h2>
+        <button id="admin-back-btn" class="btn ghost">← Back to terminals</button>
+      </div>
+      <section>
+        <h3>Allowed images</h3>
+        <p class="muted">Images users can pick from the dropdown when creating a terminal.</p>
+        <div id="allowed-list" class="admin-list"></div>
+        <form id="allowed-add-form" class="admin-add-row">
+          <input id="allowed-add-input" type="text" placeholder="e.g. ubuntu:24.04" maxlength="256">
+          <button class="btn small" type="submit">Add</button>
+        </form>
+      </section>
+      <section>
+        <h3>Custom images</h3>
+        <p class="muted">Dockerfiles built on demand as <code>termdock/&lt;name&gt;:latest</code> when no
+          cached image exists — bake tools like Zot into an image here.</p>
+        <div id="custom-list" class="admin-list"></div>
+        <button id="custom-new-btn" class="btn small">+ New custom image</button>
+        <form id="custom-editor" class="hidden">
+          <input type="hidden" id="custom-id">
+          <label>Name (becomes <code>termdock/&lt;name&gt;:latest</code>)
+            <input id="custom-name" type="text" placeholder="zot" maxlength="64">
+          </label>
+          <label>Dockerfile
+            <textarea id="custom-dockerfile" rows="14" spellcheck="false" placeholder="FROM ubuntu:24.04&#10;RUN apt-get update && apt-get install -y ..."></textarea>
+          </label>
+          <div class="modal-actions">
+            <button type="button" id="custom-cancel-btn" class="btn ghost">Cancel</button>
+            <button type="submit" class="btn primary">Save</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </div>
 </div>
 
 <!-- ============ NEW SESSION MODAL ============ -->
@@ -75,7 +114,8 @@
     <form id="new-session-form">
       <label>Name <input id="ns-name" type="text" placeholder="terminal" maxlength="64"></label>
       <label>Organization <select id="ns-org"></select></label>
-      <label>Image <input id="ns-image" type="text" placeholder="ubuntu:24.04" maxlength="256"></label>
+      <label>Image <select id="ns-image"></select></label>
+      <label id="ns-image-custom-wrap" class="hidden">Custom image <input id="ns-image-custom" type="text" placeholder="myregistry.example.com/image:tag" maxlength="256"></label>
       <label>Shell <input id="ns-shell" type="text" placeholder="/bin/bash" maxlength="128"></label>
       <div class="row">
         <label>CPUs <input id="ns-cpu" type="number" step="0.5" min="0.1" max="32" value="2"></label>

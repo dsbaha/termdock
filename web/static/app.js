@@ -112,6 +112,7 @@ function authFail(r) {
 async function boot(user) {
   S.user = user;
   $('user-label').textContent = user.username + (user.is_admin ? ' (admin)' : '');
+  $('admin-btn').classList.toggle('hidden', !user.is_admin);
   showApp();
   await loadOrgs();
   await loadSessions();
@@ -175,7 +176,7 @@ function visibleSessions() {
 }
 
 function statusLabel(s) {
-  if (s.status === 'creating' || s.status === 'pulling') return 'starting…';
+  if (s.status === 'creating' || s.status === 'pulling' || s.status === 'building') return 'starting…';
   return s.status;
 }
 
@@ -432,7 +433,10 @@ function attachTab(tab) {
 /* ---------------- New session modal ---------------- */
 
 function initNewSessionModal() {
-  $('new-session-btn').onclick = () => {
+  $('new-session-btn').onclick = async () => {
+    await loadImageOptions(); // refresh the dropdown each time it opens
+    $('ns-image-custom-wrap').classList.add('hidden');
+    $('ns-image-custom').value = '';
     const sel = $('ns-org');
     sel.innerHTML = '';
     for (const o of S.orgs) {
@@ -449,10 +453,12 @@ function initNewSessionModal() {
   $('new-session-form').onsubmit = async (e) => {
     e.preventDefault();
     const idleVal = parseInt($('ns-idle').value, 10);
+    let image = $('ns-image').value;
+    if (image === '__custom') image = $('ns-image-custom').value.trim();
     const body = {
       name: $('ns-name').value.trim(),
       org_id: $('ns-org').value,
-      image: $('ns-image').value.trim() || undefined,
+      image: image || undefined,
       shell: $('ns-shell').value.trim() || undefined,
       cpu: parseFloat($('ns-cpu').value) || undefined,
       memory_mb: parseInt($('ns-memory').value, 10) || undefined,
@@ -552,11 +558,174 @@ function startPolling() {
   pollTimer = setInterval(loadSessions, 5000);
 }
 
+/* ---------------- Admin: image management ---------------- */
+
+function initAdmin() {
+  $('admin-btn').onclick = () => showAdmin(true);
+  $('admin-back-btn').onclick = () => showAdmin(false);
+  $('allowed-add-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const image = $('allowed-add-input').value.trim();
+    if (!image) return;
+    const r = await api('POST', '/api/admin/images', { image });
+    if (!r.ok) return toast('Add failed: ' + apiError(r));
+    $('allowed-add-input').value = '';
+    await loadAllowedImages();
+    await loadImageOptions(); // keep the new-terminal dropdown in sync
+  };
+  $('custom-new-btn').onclick = () => {
+    $('custom-id').value = '';
+    $('custom-name').value = '';
+    $('custom-name').disabled = false;
+    $('custom-dockerfile').value = 'FROM ubuntu:24.04\n';
+    $('custom-editor').classList.remove('hidden');
+  };
+  $('custom-cancel-btn').onclick = () => $('custom-editor').classList.add('hidden');
+  $('custom-editor').onsubmit = async (e) => {
+    e.preventDefault();
+    const id = $('custom-id').value;
+    const body = { name: $('custom-name').value.trim(), dockerfile: $('custom-dockerfile').value };
+    const r = id
+      ? await api('PUT', `/api/admin/custom-images/${id}`, body)
+      : await api('POST', '/api/admin/custom-images', body);
+    if (!r.ok) return toast('Save failed: ' + apiError(r));
+    $('custom-editor').classList.add('hidden');
+    await loadCustomImages();
+    await loadImageOptions();
+  };
+}
+
+function showAdmin(show) {
+  document.querySelector('#app-view .layout').classList.toggle('hidden', show);
+  $('admin-view').classList.toggle('hidden', !show);
+  if (show) { loadAllowedImages(); loadCustomImages(); }
+}
+
+async function loadAllowedImages() {
+  const r = await api('GET', '/api/admin/images');
+  if (!r.ok) return;
+  const list = $('allowed-list');
+  list.innerHTML = '';
+  for (const a of r.data.images || []) {
+    const row = document.createElement('div');
+    row.className = 'admin-row';
+    const code = document.createElement('code');
+    code.className = 'grow';
+    code.textContent = a.image;
+    const del = document.createElement('button');
+    del.className = 'btn small danger';
+    del.textContent = 'Remove';
+    del.onclick = async () => {
+      if (!confirm(`Remove "${a.image}" from the allowed list?`)) return;
+      const dr = await api('DELETE', `/api/admin/images/${a.id}`);
+      if (!dr.ok) return toast('Remove failed: ' + apiError(dr));
+      await loadAllowedImages();
+      await loadImageOptions();
+    };
+    row.appendChild(code); row.appendChild(del);
+    list.appendChild(row);
+  }
+  if (!list.children.length) list.innerHTML = '<p class="muted">No images allowed yet.</p>';
+}
+
+async function loadCustomImages() {
+  const r = await api('GET', '/api/admin/custom-images');
+  if (!r.ok) return;
+  const list = $('custom-list');
+  list.innerHTML = '';
+  for (const c of r.data.images || []) {
+    const row = document.createElement('div');
+    row.className = 'admin-row';
+    row.style.flexWrap = 'wrap';
+    const code = document.createElement('code');
+    code.className = 'grow';
+    code.textContent = `termdock/${c.name}:latest`;
+    const tag = document.createElement('span');
+    tag.className = 'status-tag ' + c.status;
+    tag.textContent = c.status;
+    const edit = document.createElement('button');
+    edit.className = 'btn small ghost';
+    edit.textContent = 'Edit';
+    edit.onclick = () => {
+      $('custom-id').value = c.id;
+      $('custom-name').value = c.name;
+      $('custom-name').disabled = false;
+      $('custom-dockerfile').value = c.dockerfile;
+      $('custom-editor').classList.remove('hidden');
+    };
+    const build = document.createElement('button');
+    build.className = 'btn small ghost';
+    build.textContent = 'Build now';
+    build.onclick = async () => {
+      const br = await api('POST', `/api/admin/custom-images/${c.id}/build`);
+      if (!br.ok) return toast('Build failed: ' + apiError(br));
+      toast('Build started — status updates here.');
+      await loadCustomImages();
+    };
+    const del = document.createElement('button');
+    del.className = 'btn small danger';
+    del.textContent = 'Delete';
+    del.onclick = async () => {
+      if (!confirm(`Delete custom image "${c.name}"? Its Dockerfile record is removed; any cached built image stays.`)) return;
+      const dr = await api('DELETE', `/api/admin/custom-images/${c.id}`);
+      if (!dr.ok) return toast('Delete failed: ' + apiError(dr));
+      await loadCustomImages();
+      await loadImageOptions();
+    };
+    row.appendChild(code); row.appendChild(tag);
+    row.appendChild(edit); row.appendChild(build); row.appendChild(del);
+    if (c.status_msg) {
+      const msg = document.createElement('div');
+      msg.className = 'err-msg';
+      msg.textContent = c.status_msg;
+      row.appendChild(msg);
+    }
+    list.appendChild(row);
+  }
+  if (!list.children.length) list.innerHTML = '<p class="muted">No custom images yet.</p>';
+}
+
+// Fill the new-terminal image dropdown. Admins also get a "Custom…" entry
+// revealing a free-text field.
+async function loadImageOptions() {
+  const sel = $('ns-image');
+  const r = await api('GET', '/api/images');
+  sel.innerHTML = '';
+  if (r.ok) {
+    for (const o of r.data.images || []) {
+      const opt = document.createElement('option');
+      opt.value = o.image;
+      opt.textContent = o.custom ? `${o.image} (custom)` : o.image;
+      sel.appendChild(opt);
+    }
+  }
+  if (S.user && S.user.is_admin) {
+    const opt = document.createElement('option');
+    opt.value = '__custom';
+    opt.textContent = 'Custom…';
+    sel.appendChild(opt);
+  }
+  if (!sel.options.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '(no images available)';
+    sel.appendChild(opt);
+  }
+}
+
+function initImageSelect() {
+  $('ns-image').onchange = () => {
+    $('ns-image-custom-wrap').classList.toggle('hidden', $('ns-image').value !== '__custom');
+  };
+}
+
 /* ---------------- Boot ---------------- */
 
 document.addEventListener('DOMContentLoaded', () => {
   initNewSessionModal();
   initShareModal();
+  initAdmin();
+  initImageSelect();
   $('new-term-btn').onclick = () => newTerminalTab();
   window.addEventListener('resize', () => {
     for (const [id, t] of S.tabs) {

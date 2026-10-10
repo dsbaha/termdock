@@ -1,6 +1,8 @@
 // Package model defines the core domain types shared across packages.
 package model
 
+import "strings"
+
 // Share roles.
 const (
 	ShareRoleViewer       = "viewer"
@@ -18,10 +20,41 @@ const (
 const (
 	SessionCreating = "creating"
 	SessionPulling  = "pulling"
+	SessionBuilding = "building"
 	SessionRunning  = "running"
 	SessionStopped  = "stopped"
 	SessionError    = "error"
 )
+
+// CustomImage statuses.
+const (
+	CustomImageIdle     = "idle"
+	CustomImageBuilding = "building"
+	CustomImageReady    = "ready"
+	CustomImageError    = "error"
+)
+
+// CustomImagePrefix is the repository prefix for admin-built images:
+// a custom image named "zot" becomes "termdock/zot:latest".
+const CustomImagePrefix = "termdock/"
+
+// CustomImageTag returns the image reference for a custom image name.
+func CustomImageTag(name string) string {
+	return CustomImagePrefix + name + ":latest"
+}
+
+// ParseCustomImageName returns the custom image name if ref is a
+// termdock/<name>:latest reference.
+func ParseCustomImageName(ref string) (string, bool) {
+	if !strings.HasPrefix(ref, CustomImagePrefix) || !strings.HasSuffix(ref, ":latest") {
+		return "", false
+	}
+	name := strings.TrimSuffix(strings.TrimPrefix(ref, CustomImagePrefix), ":latest")
+	if name == "" || strings.Contains(name, "/") {
+		return "", false
+	}
+	return name, true
+}
 
 // User is a TermDock account.
 type User struct {
@@ -74,4 +107,24 @@ type AuthSession struct {
 	Token     string
 	UserID    string
 	ExpiresAt int64
+}
+
+// AllowedImage is an admin-approved image users may run.
+type AllowedImage struct {
+	ID        string `json:"id"`
+	Image     string `json:"image"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+// CustomImage is an admin-defined Dockerfile. It is built on demand as
+// termdock/<name>:latest when a session requests it and no cached image
+// exists.
+type CustomImage struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Dockerfile string `json:"dockerfile"`
+	Status     string `json:"status"`
+	StatusMsg  string `json:"status_msg"`
+	CreatedAt  int64  `json:"created_at"`
+	UpdatedAt  int64  `json:"updated_at"`
 }

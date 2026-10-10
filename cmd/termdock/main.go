@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"termdock/internal/admin"
 	"termdock/internal/auth"
 	"termdock/internal/config"
 	"termdock/internal/db"
@@ -76,6 +77,13 @@ func main() {
 		DefaultImage:   cfg.DefaultImage,
 		DefaultIdleMin: cfg.DefaultIdleMin,
 	}
+	adminH := &admin.Handler{DB: database, Docker: dockerClient}
+
+	// Seed the admin-managed image list with the configured default so the
+	// new-terminal dropdown is never empty on a fresh install.
+	if err := database.EnsureDefaultAllowedImage(cfg.DefaultImage, db.Now()); err != nil {
+		log.Printf("seed allowed images: %v", err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -137,6 +145,17 @@ func main() {
 	mux.Handle("DELETE /api/sessions/{id}/shares/{shareID}", authed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessH.RevokeShare(w, r, r.PathValue("id"), r.PathValue("shareID"))
 	})))
+
+	// Image management: the dropdown source plus admin CRUD.
+	mux.Handle("GET /api/images", authed(http.HandlerFunc(adminH.AvailableImages)))
+	mux.Handle("GET /api/admin/images", authed(http.HandlerFunc(adminH.ListAllowed)))
+	mux.Handle("POST /api/admin/images", authed(http.HandlerFunc(adminH.AddAllowed)))
+	mux.Handle("DELETE /api/admin/images/{id}", authed(http.HandlerFunc(adminH.DeleteAllowed)))
+	mux.Handle("GET /api/admin/custom-images", authed(http.HandlerFunc(adminH.ListCustom)))
+	mux.Handle("POST /api/admin/custom-images", authed(http.HandlerFunc(adminH.CreateCustom)))
+	mux.Handle("PUT /api/admin/custom-images/{id}", authed(http.HandlerFunc(adminH.UpdateCustom)))
+	mux.Handle("DELETE /api/admin/custom-images/{id}", authed(http.HandlerFunc(adminH.DeleteCustom)))
+	mux.Handle("POST /api/admin/custom-images/{id}/build", authed(http.HandlerFunc(adminH.BuildCustom)))
 
 	// Standalone popup terminal page. Auth is checked here so an expired
 	// session gets a friendly message; authorization for the session itself

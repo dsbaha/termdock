@@ -141,6 +141,19 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid image")
 		return
 	}
+	// Non-admins may only run images from the admin-managed list (allowed
+	// images and custom-image tags). Admins keep free choice.
+	if !u.IsAdmin {
+		ok, err := h.imagePermitted(image)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		if !ok {
+			writeErr(w, http.StatusForbidden, "image is not in the allowed list")
+			return
+		}
+	}
 	shell := strings.TrimSpace(req.Shell)
 	if shell == "" {
 		shell = "/bin/bash"
@@ -229,10 +242,34 @@ func (h *Handler) provision(sessionID string) {
 	}
 
 	log.Printf("provision %s: pulling image %s", sessionID, sess.Image)
-	set(model.SessionPulling, "pulling image "+sess.Image)
-	if err := h.Docker.PullImage(ctx, sess.Image); err != nil {
-		fail("image pull failed: " + err.Error())
-		return
+	if name, isCustom := model.ParseCustomImageName(sess.Image); isCustom {
+		// Custom image: build from the stored Dockerfile only when no
+		// cached image exists.
+		if h.Docker.ImageExists(ctx, sess.Image) {
+			log.Printf("provision %s: custom image %s already cached", sessionID, sess.Image)
+			set(model.SessionPulling, "using cached image "+sess.Image)
+		} else {
+			custom, err := h.DB.GetCustomImageByName(name)
+			if err != nil || custom == nil {
+				fail("custom image " + sess.Image + " has no stored Dockerfile")
+				return
+			}
+			log.Printf("provision %s: building custom image %s", sessionID, sess.Image)
+			set(model.SessionBuilding, "building image "+sess.Image)
+			_ = h.DB.UpdateCustomImageStatus(custom.ID, model.CustomImageBuilding, "", db.Now())
+			if err := h.Docker.BuildImage(ctx, sess.Image, custom.Dockerfile); err != nil {
+				_ = h.DB.UpdateCustomImageStatus(custom.ID, model.CustomImageError, err.Error(), db.Now())
+				fail("image build failed: " + err.Error())
+				return
+			}
+			_ = h.DB.UpdateCustomImageStatus(custom.ID, model.CustomImageReady, "", db.Now())
+		}
+	} else {
+		set(model.SessionPulling, "pulling image "+sess.Image)
+		if err := h.Docker.PullImage(ctx, sess.Image); err != nil {
+			fail("image pull failed: " + err.Error())
+			return
+		}
 	}
 
 	log.Printf("provision %s: creating container", sessionID)
@@ -460,6 +497,24 @@ func validTermID(id string) bool {
 		return false
 	}
 	return true
+}
+
+// imagePermitted reports whether image may be run by a non-admin: it is on
+// the allowed list or is a custom-image tag with a stored Dockerfile.
+func (h *Handler) imagePermitted(image string) (bool, error) {
+	if ok, err := h.DB.IsImageAllowed(image); err != nil {
+		return false, err
+	} else if ok {
+		return true, nil
+	}
+	if name, isCustom := model.ParseCustomImageName(image); isCustom {
+		c, err := h.DB.GetCustomImageByName(name)
+		if err != nil {
+			return false, err
+		}
+		return c != nil, nil
+	}
+	return false, nil
 }
 
 // CreateShare handles POST /api/sessions/{id}/shares {username, role}.

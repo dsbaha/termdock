@@ -95,6 +95,20 @@ func (d *DB) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_shares_session ON shares(session_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_shares_user ON shares(user_id)`,
+		`CREATE TABLE IF NOT EXISTS allowed_images (
+			id TEXT PRIMARY KEY,
+			image TEXT NOT NULL UNIQUE,
+			created_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS custom_images (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			dockerfile TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'idle',
+			status_msg TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := d.Exec(s); err != nil {

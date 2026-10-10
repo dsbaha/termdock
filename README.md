@@ -49,10 +49,20 @@ TERMDOCK_DATA=./data ./termdock
 
 ## Using it
 
-- **New terminal**: pick a name, org, image (default `ubuntu:24.04`), shell,
-  CPU / memory limits, and idle timeout. The session shows `starting…` while
-  the image pulls and the container starts; the tab attaches automatically
-  when it is `running`.
+- **New terminal**: pick a name, org, image, shell, CPU / memory limits, and
+  idle timeout. The image is a dropdown of admin-approved images (see below).
+  The session shows `starting…` while the image pulls and the container
+  starts; the tab attaches automatically when it is `running`.
+- **Admin: image management**: admins get an **Admin** button in the header.
+  - **Allowed images**: the dropdown list users pick from. Seeded with the
+    configured default image on first run; admins can add/remove entries.
+    Non-admins can only run allowed images (or custom-image tags); admins
+    keep free choice via a "Custom…" entry.
+  - **Custom images**: define a Dockerfile (e.g. baking in Zot); it becomes
+    `termdock/<name>:latest`. When a session requests it and no cached image
+    exists, TermDock builds it automatically during provisioning (status
+    shows `building`); otherwise the cached image is reused. A "Build now"
+    button pre-builds in the background, with status shown in the list.
 - **Multiple terminals per container**: the **+** button in the tab bar opens
   another tab with its own shell (`docker exec`) in the active tab's
   container — tabs are labeled `name`, `name (2)`, `name (3)`, …. The sidebar

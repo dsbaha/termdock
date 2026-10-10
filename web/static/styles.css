@@ -185,6 +185,39 @@ code { background: var(--bg3); padding: 1px 5px; border-radius: 4px; font-size: 
   margin-left: 4px;
 }
 .tab-add:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ---------------- Admin view ---------------- */
+.admin-view { padding: 28px; overflow-y: auto; height: 100%; }
+.admin-panel { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+.admin-head { display: flex; align-items: center; justify-content: space-between; }
+.admin-head h2 { margin: 0; }
+.admin-panel section h3 { margin: 0 0 4px; }
+.admin-panel section p.muted { margin: 0 0 12px; font-size: 13px; }
+.admin-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.admin-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  font-size: 13px;
+}
+.admin-row code { font-family: ui-monospace, monospace; }
+.admin-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.admin-row .status-tag {
+  font-size: 11px; padding: 2px 10px; border-radius: 10px; background: var(--bg3); color: var(--muted);
+}
+.admin-row .status-tag.ready { color: var(--green); }
+.admin-row .status-tag.building { color: var(--accent); }
+.admin-row .status-tag.error { color: var(--red); }
+.admin-row .err-msg { font-size: 11px; color: var(--red); flex-basis: 100%; }
+.admin-add-row { display: flex; gap: 8px; }
+.admin-add-row input { flex: 1; }
+#custom-editor { display: flex; flex-direction: column; gap: 12px; margin-top: 12px;
+  padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
+#custom-editor label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+#custom-editor textarea {
+  font-family: ui-monospace, monospace; font-size: 12px; resize: vertical;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 10px;
+}
 .tab-panels { flex: 1; position: relative; min-height: 0; }
 .tab-panel {
   position: absolute; inset: 0;

@@ -4,6 +4,7 @@
 package dockerx
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
@@ -142,6 +144,71 @@ func (c *Client) EnsureNetwork(ctx context.Context) error {
 func (c *Client) ImageExists(ctx context.Context, ref string) bool {
 	_, err := c.cli.ImageInspect(ctx, ref)
 	return err == nil
+}
+
+// BuildImage builds tag from an in-memory Dockerfile (a tar stream holding
+// just the Dockerfile is sent as the build context). The build output stream
+// is drained; on failure the tail of the output is included in the error.
+func (c *Client) BuildImage(ctx context.Context, tag, dockerfile string) error {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	data := []byte(dockerfile)
+	if err := tw.WriteHeader(&tar.Header{Name: "Dockerfile", Mode: 0o600, Size: int64(len(data))}); err != nil {
+		return fmt.Errorf("build context: %w", err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		return fmt.Errorf("build context: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("build context: %w", err)
+	}
+	resp, err := c.cli.ImageBuild(ctx, &buf, build.ImageBuildOptions{
+		Tags:        []string{tag},
+		Dockerfile:  "Dockerfile",
+		Remove:      true,
+		ForceRemove: true,
+	})
+	if err != nil {
+		return fmt.Errorf("build image %q: %w", tag, err)
+	}
+	defer resp.Body.Close()
+	// Drain the JSON progress stream; keep the tail for diagnostics.
+	const tailMax = 8 * 1024
+	tail := make([]byte, 0, tailMax)
+	tmp := make([]byte, 32*1024)
+	for {
+		n, err := resp.Body.Read(tmp)
+		if n > 0 {
+			tail = append(tail, tmp[:n]...)
+			if len(tail) > tailMax {
+				tail = tail[len(tail)-tailMax:]
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	// A failed build usually surfaces as an "error" / "errorDetail" object
+	// in the stream rather than an HTTP error; detect it in the tail.
+	var streamErr string
+	for _, line := range bytes.Split(tail, []byte("\n")) {
+		var obj struct {
+			Error       string `json:"error"`
+			ErrorDetail struct {
+				Message string `json:"message"`
+			} `json:"errorDetail"`
+		}
+		if json.Unmarshal(line, &obj) == nil && obj.Error != "" {
+			streamErr = obj.Error
+			if obj.ErrorDetail.Message != "" {
+				streamErr = obj.ErrorDetail.Message
+			}
+		}
+	}
+	if streamErr != "" {
+		return fmt.Errorf("build image %q failed: %s", tag, streamErr)
+	}
+	return nil
 }
 
 // PullImage pulls ref, falling back to a local copy if the pull fails but the

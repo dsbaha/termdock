@@ -356,3 +356,118 @@ func boolToInt(b bool) int {
 	}
 	return 0
 }
+
+// ---------- images (admin-managed) ----------
+
+func (d *DB) ListAllowedImages() ([]model.AllowedImage, error) {
+	rows, err := d.Query(`SELECT id, image, created_at FROM allowed_images ORDER BY image`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.AllowedImage
+	for rows.Next() {
+		var a model.AllowedImage
+		if err := rows.Scan(&a.ID, &a.Image, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) AddAllowedImage(a *model.AllowedImage) error {
+	_, err := d.Exec(`INSERT INTO allowed_images (id, image, created_at) VALUES (?, ?, ?)`,
+		a.ID, a.Image, a.CreatedAt)
+	return err
+}
+
+func (d *DB) DeleteAllowedImage(id string) error {
+	_, err := d.Exec(`DELETE FROM allowed_images WHERE id = ?`, id)
+	return err
+}
+
+// EnsureDefaultAllowedImage seeds the allowed list with image when empty.
+func (d *DB) EnsureDefaultAllowedImage(image string, now int64) error {
+	var n int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM allowed_images`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	return d.AddAllowedImage(&model.AllowedImage{ID: NewID(), Image: image, CreatedAt: now})
+}
+
+func (d *DB) IsImageAllowed(image string) (bool, error) {
+	var n int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM allowed_images WHERE image = ?`, image).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (d *DB) ListCustomImages() ([]model.CustomImage, error) {
+	rows, err := d.Query(`SELECT id, name, dockerfile, status, status_msg, created_at, updated_at
+		FROM custom_images ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.CustomImage
+	for rows.Next() {
+		var c model.CustomImage
+		if err := rows.Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) GetCustomImage(id string) (*model.CustomImage, error) {
+	return d.getCustomImage(`id = ?`, id)
+}
+
+func (d *DB) GetCustomImageByName(name string) (*model.CustomImage, error) {
+	return d.getCustomImage(`name = ?`, name)
+}
+
+func (d *DB) getCustomImage(where, arg string) (*model.CustomImage, error) {
+	var c model.CustomImage
+	err := d.QueryRow(`SELECT id, name, dockerfile, status, status_msg, created_at, updated_at
+		FROM custom_images WHERE `+where,
+		arg).Scan(&c.ID, &c.Name, &c.Dockerfile, &c.Status, &c.StatusMsg, &c.CreatedAt, &c.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (d *DB) CreateCustomImage(c *model.CustomImage) error {
+	_, err := d.Exec(`INSERT INTO custom_images
+		(id, name, dockerfile, status, status_msg, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.Name, c.Dockerfile, c.Status, c.StatusMsg, c.CreatedAt, c.UpdatedAt)
+	return err
+}
+
+func (d *DB) UpdateCustomImage(c *model.CustomImage) error {
+	_, err := d.Exec(`UPDATE custom_images SET name = ?, dockerfile = ?, updated_at = ? WHERE id = ?`,
+		c.Name, c.Dockerfile, c.UpdatedAt, c.ID)
+	return err
+}
+
+func (d *DB) UpdateCustomImageStatus(id, status, msg string, now int64) error {
+	_, err := d.Exec(`UPDATE custom_images SET status = ?, status_msg = ?, updated_at = ? WHERE id = ?`,
+		status, msg, now, id)
+	return err
+}
+
+func (d *DB) DeleteCustomImage(id string) error {
+	_, err := d.Exec(`DELETE FROM custom_images WHERE id = ?`, id)
+	return err
+}
