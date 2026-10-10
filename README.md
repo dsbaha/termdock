@@ -89,7 +89,7 @@ All config is environment variables:
 | `TERMDOCK_ADDR` | `:8080` | Listen address |
 | `TERMDOCK_DATA` | `./data` | Directory holding `termdock.db` |
 | `DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon (standard `DOCKER_*` env also honored) |
-| `TERMDOCK_DOCKER_HOST` | _(unset)_ | Override for the container runtime socket; takes precedence over `DOCKER_HOST`. Use `unix:///var/run/podman/podman.sock` on Podman hosts |
+| `TERMDOCK_DOCKER_HOST` | _(unset)_ | Override for the container runtime socket; takes precedence over `DOCKER_HOST`. A bare path like `/var/run/podman/podman.sock` is accepted (treated as a unix socket) — the `unix://` prefix is optional |
 | `TERMDOCK_REG_OPEN` | `true` | Allow self-registration (`false` disables `/api/auth/register`) |
 | `TERMDOCK_DEFAULT_IMAGE` | `ubuntu:24.04` | Default image for new sessions |
 | `TERMDOCK_IDLE_DEFAULT` | `60` | Default idle timeout in minutes (`0` = never) |

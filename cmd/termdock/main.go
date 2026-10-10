@@ -41,7 +41,13 @@ func main() {
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if err := dockerClient.Ping(ctx); err != nil {
-			log.Printf("docker daemon not reachable (%v); container operations will be unavailable", err)
+			// Prefer a precise, actionable diagnosis for unix sockets
+			// (missing socket vs permission denied) over the raw ping error.
+			if uerr := dockerx.CheckUnixSocket(dockerx.ResolveHost()); uerr != nil {
+				log.Printf("container runtime not reachable: %v; container operations will be unavailable", uerr)
+			} else {
+				log.Printf("docker daemon not reachable (%v); container operations will be unavailable", err)
+			}
 			dockerClient = nil
 		}
 		cancel()

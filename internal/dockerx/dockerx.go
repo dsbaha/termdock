@@ -8,8 +8,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -42,20 +44,55 @@ type Client struct {
 	cli *client.Client
 }
 
-// New creates a Docker client from the environment (DOCKER_HOST and friends)
-// with API version negotiation.
-//
-// TERMDOCK_DOCKER_HOST, when set, takes precedence over DOCKER_HOST. It
-// exists so the socket is a first-class TermDock option alongside the other
-// TERMDOCK_* variables — e.g. TERMDOCK_DOCKER_HOST=unix:///var/run/podman/podman.sock
-// on Podman hosts (Podman's Docker-compatible API works for everything
-// TermDock needs: images, containers, volumes, networks, exec).
-func New() (*Client, error) {
-	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
-	if h := os.Getenv("TERMDOCK_DOCKER_HOST"); h != "" {
-		opts = append(opts, client.WithHost(h))
+// ResolveHost determines the container runtime endpoint:
+// TERMDOCK_DOCKER_HOST wins, then DOCKER_HOST, then the default docker socket.
+// A bare filesystem path (no "://" scheme, e.g. /var/run/podman/podman.sock)
+// is treated as a unix socket — the Docker SDK's parser requires a scheme,
+// so users shouldn't have to remember "unix://".
+func ResolveHost() string {
+	h := os.Getenv("TERMDOCK_DOCKER_HOST")
+	if h == "" {
+		h = os.Getenv("DOCKER_HOST")
 	}
-	cli, err := client.NewClientWithOpts(opts...)
+	if h == "" {
+		h = "unix:///var/run/docker.sock"
+	}
+	if !strings.Contains(h, "://") && (strings.HasPrefix(h, "/") || strings.HasPrefix(h, ".")) {
+		h = "unix://" + h
+	}
+	return h
+}
+
+// CheckUnixSocket dials host when it is a unix:// socket and returns a
+// precise, actionable error instead of a generic "not reachable".
+// Returns nil for non-unix hosts or when the socket accepts the connection.
+func CheckUnixSocket(host string) error {
+	if !strings.HasPrefix(host, "unix://") {
+		return nil
+	}
+	path := strings.TrimPrefix(host, "unix://")
+	conn, err := net.DialTimeout("unix", path, 5*time.Second)
+	if err != nil {
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return fmt.Errorf("socket %s does not exist — is the runtime API service running? (Docker: dockerd; Podman: `sudo systemctl enable --now podman.socket` or `podman system service`)", path)
+		case errors.Is(err, fs.ErrPermission):
+			return fmt.Errorf("permission denied opening %s — run TermDock as a user with socket access (root, or member of the docker/podman group)", path)
+		default:
+			return fmt.Errorf("cannot connect to %s: %v", path, err)
+		}
+	}
+	_ = conn.Close()
+	return nil
+}
+
+// New creates a Docker client from the environment with API version
+// negotiation. The effective host comes from ResolveHost() and is written
+// back to DOCKER_HOST (process-local) so the standard client.FromEnv path —
+// TLS, certs, API version — sees the normalized, parseable value.
+func New() (*Client, error) {
+	os.Setenv("DOCKER_HOST", ResolveHost())
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
